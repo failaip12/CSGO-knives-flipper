@@ -18,8 +18,8 @@ USE `knives` ;
 -- Table `knives`.`Knives`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `knives`.`Knives` (
-  `idKnives` INT NOT NULL AUTO_INCREMENT,
-  `knife_name` VARCHAR(45) NOT NULL,
+  `idKnives` INT NOT NULL,
+  `knife_name` VARCHAR(100) NOT NULL,
   `min_price_with_fee` FLOAT NOT NULL,
   `min_price_without_fee` FLOAT NOT NULL,
   `buy_order_price` FLOAT NOT NULL,

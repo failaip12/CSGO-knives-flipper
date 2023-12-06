@@ -176,7 +176,10 @@ def get_knife_info_and_save_to_db(knife_name, cursor, connection):
         min_price_with_fee = 0
         min_price_without_fee = 0
     else:
-        min_price_with_fee = float(min_price_with_fee[0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
+        if(str(min_price_with_fee) == "Sold!"):
+            return
+        else:
+            min_price_with_fee = float(min_price_with_fee[0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
         min_price_without_fee = float(min_price_without_fee[0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
     buy_order_price = float(buy_orders[1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
     script_tags = driver.find_elements(By.TAG_NAME, 'script')
@@ -203,12 +206,12 @@ def get_knife_info_and_save_to_db(knife_name, cursor, connection):
         'buy_order_price': buy_order_price,
         'last_updated': datetime.datetime.now()
     }
-
+    
     # Create a parameterized query
-    insert_query = "INSERT INTO knives (knife_name, knife_id, min_price_with_fee, min_price_without_fee, buy_order_price, last_updated) VALUES (%s, %s, %s, %s, %s, %s)"
+    insert_query = "INSERT INTO knives (idKnives, knife_name, min_price_with_fee, min_price_without_fee, buy_order_price, last_updated) VALUES (%s, %s, %s, %s, %s, %s)"
     
     # Execute the query with the data as parameters
-    cursor.execute(insert_query, (new_knife['knife_name'], new_knife['knife_id'], new_knife['min_price_with_fee'], new_knife['min_price_without_fee'], new_knife['buy_order_price'], new_knife['last_updated']))
+    cursor.execute(insert_query, (new_knife['knife_id'], new_knife['knife_name'], new_knife['min_price_with_fee'], new_knife['min_price_without_fee'], new_knife['buy_order_price'], new_knife['last_updated']))
     
     # Commit the changes to the database
     connection.commit()
@@ -273,12 +276,12 @@ if __name__ == "__main__":
     #knife_list = get_knife_list()
     #save_to_file(knife_list, "knife_names.txt")
     #print("Knife names saved to 'knife_names.txt'.")
-    #options = Options()
-    #options.add_argument('--headless')
-    #options.add_argument('--disable-gpu')
-    #options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
-    #driver = webdriver.Chrome(options=options)
-    #driver.request_interceptor = interceptor
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
+    driver = webdriver.Chrome(options=options)
+    driver.request_interceptor = interceptor
 
     try:
         connection = mysql.connector.connect(host='localhost',
@@ -298,10 +301,10 @@ if __name__ == "__main__":
         print("Greška u konekciji ", e)
     
     
-    #knife_list = load_from_file("knife_names.txt")
-    #for knife in tqdm(knife_list):
-    #    get_knife_info_and_save_to_db(knife, cursor, connection)
-
+    knife_list = load_from_file("knife_names.txt")
+    for knife in tqdm(knife_list):
+        get_knife_info_and_save_to_db(knife, cursor, connection)
+    exit()
     select_query = "SELECT knife_id, knife_name FROM knives"
 
     # Execute the query
@@ -310,7 +313,6 @@ if __name__ == "__main__":
     # Fetch all the results
     knife_data = cursor.fetchall()
 
-    # If you want to work with the results in Python, you can iterate through the knife_ids
     for row in tqdm(knife_data):
         knife_id = row[0]
         knife_name = row[1]
