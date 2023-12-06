@@ -139,6 +139,20 @@ def save_to_file(knife_names, filename):
         for name in knife_names:
             file.write(name + '\n')
 
+def add_new_knives_to_db(knife_names):
+    for knife_name in tqdm(knife_names):
+        new_knife = {
+            'knife_name': knife_name
+        }
+        
+        # Create a parameterized query
+        insert_query = "INSERT INTO knives (knife_name) VALUES (%s)"
+        # Execute the query with the data as parameters
+        cursor.execute(insert_query, (new_knife['knife_name'],))
+        
+        # Commit the changes to the database
+        connection.commit()
+
 def get_knife_info_and_save_to_db(knife_name, cursor, connection):
     url = f"https://steamcommunity.com/market/listings/730/{knife_name}"
     page = parse_page(url, driver, 6)
@@ -208,10 +222,11 @@ def get_knife_info_and_save_to_db(knife_name, cursor, connection):
     }
     
     # Create a parameterized query
-    insert_query = "INSERT INTO knives (idKnives, knife_name, min_price_with_fee, min_price_without_fee, buy_order_price, last_updated) VALUES (%s, %s, %s, %s, %s, %s)"
+    # Create a parameterized query
+    update_query = "UPDATE knives SET knife_id = %s, min_price_with_fee = %s, min_price_without_fee = %s, buy_order_price = %s, last_updated = %s WHERE knives.knife_name = %s"
     
     # Execute the query with the data as parameters
-    cursor.execute(insert_query, (new_knife['knife_id'], new_knife['knife_name'], new_knife['min_price_with_fee'], new_knife['min_price_without_fee'], new_knife['buy_order_price'], new_knife['last_updated']))
+    cursor.execute(update_query, (new_knife['knife_id'], new_knife['min_price_with_fee'], new_knife['min_price_without_fee'], new_knife['buy_order_price'], new_knife['last_updated'], new_knife['knife_name']))
     
     # Commit the changes to the database
     connection.commit()
@@ -300,8 +315,9 @@ if __name__ == "__main__":
     except Error as e:
         print("Greška u konekciji ", e)
     
-    
     knife_list = load_from_file("knife_names.txt")
+    # add_new_knives_to_db(knife_list)
+    # exit()
     for knife in tqdm(knife_list):
         get_knife_info_and_save_to_db(knife, cursor, connection)
     exit()

@@ -18,13 +18,15 @@ USE `knives` ;
 -- Table `knives`.`Knives`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `knives`.`Knives` (
-  `knife_name` VARCHAR(100) NOT NULL,
-  `min_price_with_fee` FLOAT NOT NULL,
-  `min_price_without_fee` FLOAT NOT NULL,
-  `buy_order_price` FLOAT NOT NULL,
-  `last_updated` DATETIME NOT NULL,
-  PRIMARY KEY (`knife_name`),
-  UNIQUE INDEX `idKnives_UNIQUE` (`knife_name` ASC) VISIBLE)
+  `knife_id` INT NOT NULL AUTO_INCREMENT,
+  `knife_name` VARCHAR(150) NOT NULL,
+  `min_price_with_fee` FLOAT NULL,
+  `min_price_without_fee` FLOAT NULL,
+  `buy_order_price` FLOAT NULL,
+  `last_updated` DATETIME NULL,
+  PRIMARY KEY (`knife_id`),
+  UNIQUE INDEX `idKnives_UNIQUE` (`knife_id` ASC) VISIBLE,
+  UNIQUE INDEX `min_price_with_fee_copy1_UNIQUE` (`knife_name` ASC) VISIBLE)
 ENGINE = InnoDB;
 
 
