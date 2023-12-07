@@ -13,7 +13,6 @@ from selenium.webdriver.common.by import By
 from tqdm import tqdm
 from mysql.connector import Error
 
-
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
 # https://steamcommunity.com/market/search?q=&category_730_ItemSet%5B%5D=any&category_730_ProPlayer%5B%5D=any&category_730_StickerCapsule%5B%5D=any&category_730_TournamentTeam%5B%5D=any&category_730_Weapon%5B%5D=any&category_730_Type%5B%5D=tag_CSGO_Type_Knife&appid=730#p1_price_desc
@@ -195,6 +194,8 @@ def get_knife_info_and_save_to_db(knife_name, cursor, connection):
         else:
             min_price_with_fee = float(min_price_with_fee[0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
         min_price_without_fee = float(min_price_without_fee[0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
+    if(len(buy_orders) < 1):
+        return
     buy_order_price = float(buy_orders[1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
     script_tags = driver.find_elements(By.TAG_NAME, 'script')
     for script_tag in script_tags:

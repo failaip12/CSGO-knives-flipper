@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS `knives`.`Knives` (
   `min_price_with_fee` FLOAT NULL,
   `min_price_without_fee` FLOAT NULL,
   `buy_order_price` FLOAT NULL,
+  `profit` FLOAT GENERATED ALWAYS AS (min_price_without_fee - buy_order_price) STORED,
   `last_updated` DATETIME NULL,
   PRIMARY KEY (`knife_id`),
   UNIQUE INDEX `idKnives_UNIQUE` (`knife_id` ASC) VISIBLE,
