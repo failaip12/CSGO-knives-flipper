@@ -59,7 +59,7 @@ if __name__ == "__main__":
     for knife_order in knife_orders:
         knife_name = knife_order['item_name']
         knife_listing = get_knife_info(knife_name, driver)
-        save_knife_to_db(knife_listing, cursor)
+        save_knife_to_db(knife_listing, cursor, connection)
         current_buy_order_price = float(knife_order['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
         price_difference = knife_listing["buy_order_price"] - current_buy_order_price
         if (price_difference > 0) and (current_buy_order_price != wallet_balance):

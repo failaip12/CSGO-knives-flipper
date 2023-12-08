@@ -225,7 +225,7 @@ def get_knife_info(knife_name, driver):
     
     return new_knife
 
-def save_knife_to_db(knife, cursor):
+def save_knife_to_db(knife, cursor, connection):
     
     update_query = "UPDATE knives SET knife_id = %s, min_price_with_fee = %s, min_price_without_fee = %s, buy_order_price = %s, last_updated = %s WHERE knives.knife_name = %s"
     
@@ -321,7 +321,7 @@ if __name__ == "__main__":
     # add_new_knives_to_db(knife_list)
     # exit()
     for knife_name in tqdm(knife_list):
-        save_knife_to_db(get_knife_info(knife_name, driver), cursor)
+        save_knife_to_db(get_knife_info(knife_name, driver), cursor, connection)
     exit()
     select_query = "SELECT knife_id, knife_name FROM knives"
 
