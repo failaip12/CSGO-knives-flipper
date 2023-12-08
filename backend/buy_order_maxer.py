@@ -66,7 +66,7 @@ if __name__ == "__main__":
             buy_order_id = int(knife_order["order_id"])
             response = steam_client.market.cancel_buy_order(buy_order_id)
             if(response['success'] != 1):
-                print("ERROR: Failed to cancel the buy order on the knife , skipping...", knife_name)
+                print("ERROR: Failed to cancel the buy order on the knife " + knife_name + ", skipping...")
                 continue
             else:
                 print("INFO: Succsessfully canceled the buy order on the knife ", knife_name)
@@ -79,6 +79,6 @@ if __name__ == "__main__":
                 print("ERROR: Failed to create the buy order on the knife ", knife_name)
                 lost_knife_names.append(knife_name)
             else:
-                print("INFO: Succsessfully created the buy order on the knife ", knife_name)
+                print("INFO: Succsessfully created the buy order on the knife ", knife_name, ", for the price of ", knife_listing["buy_order_price"] + 0.05)
     print(lost_knife_names)
     connection.close()
