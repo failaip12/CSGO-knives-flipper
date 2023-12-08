@@ -16,8 +16,9 @@ from mysql.connector import Error
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
 # https://steamcommunity.com/market/search?q=&category_730_ItemSet%5B%5D=any&category_730_ProPlayer%5B%5D=any&category_730_StickerCapsule%5B%5D=any&category_730_TournamentTeam%5B%5D=any&category_730_Weapon%5B%5D=any&category_730_Type%5B%5D=tag_CSGO_Type_Knife&appid=730#p1_price_desc
+
+'''
 def get_csgo_knife_prices():
-    '''
     item = sm.get_csgo_item('★ Gut Knife | Doppler (Factory New)')
     print(item)
     for listing in item.listings:
@@ -152,7 +153,7 @@ def add_new_knives_to_db(knife_names):
         # Commit the changes to the database
         connection.commit()
 
-def get_knife_info_and_save_to_db(knife_name, cursor, connection):
+def get_knife_info(knife_name, driver):
     url = f"https://steamcommunity.com/market/listings/730/{knife_name}"
     page = parse_page(url, driver, 6)
     soup = BeautifulSoup(page, "html.parser")
@@ -222,14 +223,14 @@ def get_knife_info_and_save_to_db(knife_name, cursor, connection):
         'last_updated': datetime.datetime.now()
     }
     
-    # Create a parameterized query
-    # Create a parameterized query
+    return new_knife
+
+def save_knife_to_db(knife, cursor):
+    
     update_query = "UPDATE knives SET knife_id = %s, min_price_with_fee = %s, min_price_without_fee = %s, buy_order_price = %s, last_updated = %s WHERE knives.knife_name = %s"
     
-    # Execute the query with the data as parameters
-    cursor.execute(update_query, (new_knife['knife_id'], new_knife['min_price_with_fee'], new_knife['min_price_without_fee'], new_knife['buy_order_price'], new_knife['last_updated'], new_knife['knife_name']))
+    cursor.execute(update_query, (knife['knife_id'], knife['min_price_with_fee'], knife['min_price_without_fee'], knife['buy_order_price'], knife['last_updated'], knife['knife_name']))
     
-    # Commit the changes to the database
     connection.commit()
 
 def update_knife_info_and_save_to_db(knife_id, knife_name, cursor, connection):
@@ -319,8 +320,8 @@ if __name__ == "__main__":
     knife_list = load_from_file("knife_names.txt")
     # add_new_knives_to_db(knife_list)
     # exit()
-    for knife in tqdm(knife_list):
-        get_knife_info_and_save_to_db(knife, cursor, connection)
+    for knife_name in tqdm(knife_list):
+        save_knife_to_db(get_knife_info(knife_name, driver), cursor)
     exit()
     select_query = "SELECT knife_id, knife_name FROM knives"
 
