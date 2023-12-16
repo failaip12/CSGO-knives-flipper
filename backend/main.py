@@ -216,12 +216,13 @@ def get_knife_info_GPT(knife_name, driver):
     # Handle cases where required data is not available
     if len(data['buy_orders']) < 2 or len(data['min_price_with_fee']) < 1 or len(data['min_price_without_fee']) < 1:
         return None
-
+    
+    if str(data['min_price_with_fee'][0]) == "Sold!":
+        return None
     # Process min_price_with_fee consistently
     min_price_with_fee = float(data['min_price_with_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
 
-    if str(min_price_with_fee) == "Sold!":
-        return None
+
 
     buy_order_price = float(data['buy_orders'][1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
 

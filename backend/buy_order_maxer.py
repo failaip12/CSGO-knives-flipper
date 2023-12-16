@@ -2,6 +2,7 @@ import os
 import mysql.connector
 
 from decimal import Decimal
+import time
 from dotenv import load_dotenv
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -55,30 +56,48 @@ if __name__ == "__main__":
 
         if game_name == "Counter-Strike 2" and any(keyword in item_name for keyword in ["knife", "bayonet", "karambit", "shadow daggers"]):
             knife_orders.append(l)
-    
-    for knife_order in knife_orders:
-        knife_name = knife_order['item_name']
-        knife_listing = get_knife_info(knife_name, driver)
-        save_knife_to_db(knife_listing, cursor, connection)
-        current_buy_order_price = float(knife_order['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
-        price_difference = knife_listing["buy_order_price"] - current_buy_order_price
-        if (price_difference > 0) and (current_buy_order_price != wallet_balance):
-            buy_order_id = int(knife_order["order_id"])
-            response = steam_client.market.cancel_buy_order(buy_order_id)
-            if(response['success'] != 1):
-                print("ERROR: Failed to cancel the buy order on the knife " + knife_name + ", skipping...")
-                continue
-            else:
-                print("INFO: Succsessfully canceled the buy order on the knife ", knife_name)
-            if(knife_listing["buy_order_price"] > wallet_balance):
-                print("INFO: Current max buy order price is higher than the amount of money you have in wallet, setting the price to your wallet money as fallback", knife_name)
-                response = steam_client.market.create_buy_order(knife_name, wallet_balance * 100, 1, GameOptions.CS, Currency.EURO)
-            else:
-                response = steam_client.market.create_buy_order(knife_name, knife_listing["buy_order_price"] * 100 + 5, 1, GameOptions.CS, Currency.EURO)
-            if(response['success'] != 1):
-                print("ERROR: Failed to create the buy order on the knife ", knife_name)
-                lost_knife_names.append(knife_name)
-            else:
-                print("INFO: Succsessfully created the buy order on the knife ", knife_name, ", for the price of ", knife_listing["buy_order_price"] + 0.05)
-    print(lost_knife_names)
-    connection.close()
+    while True:
+        if(len(lost_knife_names) > 0):
+            print("--------------------------------------------------------------------------")
+            print(lost_knife_names)
+            print("--------------------------------------------------------------------------")
+        for knife_order in knife_orders:
+            response = None
+            knife_name = knife_order['item_name']
+            knife_listing = get_knife_info(knife_name, driver)
+            save_knife_to_db(knife_listing, cursor, connection)
+            current_buy_order_price = float(knife_order['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
+            price_difference = knife_listing["buy_order_price"] - current_buy_order_price
+            if (price_difference > 0) and (current_buy_order_price != wallet_balance):
+                print("--------------------------------------------------------------------------")
+                print(price_difference)
+                print("--------------------------------------------------------------------------")
+                buy_order_id = int(knife_order["order_id"])
+                try:
+                    response = steam_client.market.cancel_buy_order(buy_order_id)
+                except:
+                    print("ERROR: Failed to cancel the buy order on the knife " + knife_name + ", skipping...")
+                if(response and response['success'] != 1):
+                    continue
+                else:
+                    print("INFO: Succsessfully canceled the buy order on the knife ", knife_name)
+                if(knife_listing["buy_order_price"] > wallet_balance):
+                    print("INFO: Current max buy order price is higher than the amount of money you have in wallet, setting the price to your wallet money as fallback", knife_name)
+                    try:
+                        response = steam_client.market.create_buy_order(knife_name, wallet_balance * 100, 1, GameOptions.CS, Currency.EURO)
+                    except:
+                        pass
+                else:
+                    try:
+                        # print("---------------------------------------------------")
+                        # print(knife_listing["buy_order_price"] * 100 + 5)
+                        # print("---------------------------------------------------")
+                        response = steam_client.market.create_buy_order(knife_name, knife_listing["buy_order_price"] * 100 + 5, 1, GameOptions.CS, Currency.EURO)
+                    except:
+                        pass
+                if(response and response['success'] != 1):
+                    print("ERROR: Failed to create the buy order on the knife ", knife_name)
+                    lost_knife_names.append(knife_name)
+                else:
+                    print("INFO: Succsessfully created the buy order on the knife ", knife_name, ", for the price of ", knife_listing["buy_order_price"] + 0.05)
+        time.sleep(150)
