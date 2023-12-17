@@ -1,6 +1,7 @@
 import datetime
 import time
 import re
+import json
 
 import mysql.connector
 import requests
@@ -81,7 +82,7 @@ def get_knife_list(driver):
     # pages = soup.find_all('span', class_='market_paging_pagelink')
     # numbers = [int(link.text.strip()) for link in pages]
     # number_of_pages = max(numbers)
-    number_of_pages = 252
+    number_of_pages = 250
     names = soup.find_all('span', class_='market_listing_item_name')
     new_names = []
     for name in names:
@@ -127,67 +128,16 @@ def extract_knife_data(driver, url):
     page = parse_page(url, driver, 6)
     soup = BeautifulSoup(page, "html.parser")
     buy_orders = soup.find_all('span', class_='market_commodity_orders_header_promote')
-    min_price_with_fee = soup.find_all('span', class_='market_listing_price market_listing_price_with_fee')
-    min_price_without_fee = soup.find_all('span', class_='market_listing_price market_listing_price_without_fee')
+    current_min_price_with_fee = soup.find_all('span', class_='market_listing_price market_listing_price_with_fee')
+    current_min_price_without_fee = soup.find_all('span', class_='market_listing_price market_listing_price_without_fee')
     message = soup.find_all('div', class_='market_listing_table_message')
     data = {
         'buy_orders': buy_orders, 
-        'min_price_with_fee': min_price_with_fee,
-        'min_price_without_fee': min_price_without_fee,
+        'current_min_price_with_fee': current_min_price_with_fee,
+        'current_min_price_without_fee': current_min_price_without_fee,
         'message': message
     }
     return data
-
-def get_knife_info(knife_name, driver):
-    url = f"https://steamcommunity.com/market/listings/730/{knife_name}"
-    data = extract_knife_data(driver, url)
-
-    if(data['min_price_with_fee'] == "Sold!"):
-        data = extract_knife_data(driver, url)
-    
-    while(data['message'] and "error" in  data['message'][0].text):
-        time.sleep(30)
-        data = extract_knife_data(driver, url)
-    while((len(data['buy_orders']) < 2 or len(data['min_price_with_fee']) < 1 or len(data['min_price_without_fee']) < 1) and not data['message']):
-        data = extract_knife_data(driver, url)
-    if(data['message']):
-        data['min_price_with_fee'] = 0
-        data['min_price_without_fee'] = 0
-    else:
-        if(str(data['min_price_with_fee']) == "Sold!"):
-            return
-        else:
-            data['min_price_with_fee'] = float(data['min_price_with_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
-        data['min_price_without_fee'] = float(data['min_price_without_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
-    if(len(data['buy_orders']) < 1):
-        return
-    buy_order_price = float(data['buy_orders'][1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
-    script_tags = driver.find_elements(By.TAG_NAME, 'script')
-    for script_tag in script_tags:
-        # Get the text of the script tag
-        javascript_code = script_tag.get_attribute('text')
-
-        # Find the line containing "Market_LoadOrderSpread( 176263204 );"
-        desired_line = None
-        for line in javascript_code.split('\n'):
-            if 'Market_LoadOrderSpread' in line:
-                desired_line = line.strip()
-                break
-    knife_id = None
-    if(desired_line != None):
-        match = re.search(r'\(\s*(\d+)\s*\)', desired_line)
-        if match:
-            knife_id = match.group(1)
-    new_knife = {
-        'knife_name': knife_name,
-        'knife_id': knife_id,
-        'min_price_with_fee': data['min_price_with_fee'],
-        'min_price_without_fee': data['min_price_without_fee'],
-        'buy_order_price': buy_order_price,
-        'last_updated': datetime.datetime.now()
-    }
-    
-    return new_knife
 
 def extract_knife_data_with_retry(driver, url):
     # Function to extract knife data with retries
@@ -199,30 +149,77 @@ def extract_knife_data_with_retry(driver, url):
         time.sleep(30)  # Wait for 30 seconds before retrying
     return data
 
+def get_and_save_historical_pricing(driver, cursor, connection, knife_id):
+        
+    max_attempts = 3
+    current_attempt = 0
+    console_log_result = None
+
+    while current_attempt < max_attempts:
+        console_log_result = driver.execute_script(
+            """
+            var result = {
+                data: g_plotPriceHistory && g_plotPriceHistory.data && g_plotPriceHistory.data[0],
+            };
+            return JSON.stringify(result);
+            """
+        )
+
+        # If data is not null, break out of the loop
+        if console_log_result is not None:
+            if(json.loads(console_log_result)['data'] is not None):
+                break
+
+        current_attempt += 1
+        time.sleep(1)  # Adjust the wait time as needed
+
+    # Parse the JSON string back to a Python object
+    if console_log_result is not None:
+        console_log_result_json = json.loads(console_log_result)
+        if(console_log_result_json['data'] is not None):
+            for result in console_log_result_json['data']:
+                date_string = result[0][:-4]
+                date_format = "%b %d %Y %H"
+
+                parsed_date = datetime.datetime.strptime(date_string, date_format)
+                price = result[1]
+                sold_count = result[2]
+                select_query = "SELECT * FROM SellTimes WHERE sell_time = (%s)"
+                cursor.execute(select_query, (parsed_date,))
+                existing_date = cursor.fetchone()
+                date_id = None
+                if not existing_date:
+                    insert_query = "INSERT INTO SellTimes (sell_time) VALUES (%s)"
+                    cursor.execute(insert_query, (parsed_date,))
+                    connection.commit()
+                    date_id = cursor.lastrowid
+                else:
+                    date_id = existing_date[0]
+                insert_query = "INSERT INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)"
+                cursor.execute(insert_query, (knife_id, date_id, price, sold_count))
+                connection.commit()
+    
+    return (price, parsed_date)
+    
+
 def get_knife_info_GPT(knife_name, driver):
     url = f"https://steamcommunity.com/market/listings/730/{knife_name}"
     
     # Extract knife data with retries
     data = extract_knife_data_with_retry(driver, url)
 
-    # Handle sold case
-    if data['min_price_with_fee'] == "Sold!":
-        return None
-
     # Handle cases where there is an error message
     if data['message'] and "error" in data['message'][0].text:
         return None
 
     # Handle cases where required data is not available
-    if len(data['buy_orders']) < 2 or len(data['min_price_with_fee']) < 1 or len(data['min_price_without_fee']) < 1:
+    if len(data['buy_orders']) < 2 or len(data['current_min_price_with_fee']) < 1 or len(data['current_min_price_without_fee']) < 1:
         return None
     
-    if str(data['min_price_with_fee'][0]) == "Sold!":
+    if str(data['current_min_price_with_fee'][0]) == "Sold!":
         return None
     # Process min_price_with_fee consistently
-    min_price_with_fee = float(data['min_price_with_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
-
-
+    current_min_price_with_fee = float(data['current_min_price_with_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
 
     buy_order_price = float(data['buy_orders'][1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
 
@@ -241,22 +238,29 @@ def get_knife_info_GPT(knife_name, driver):
         match = re.search(r'\(\s*(\d+)\s*\)', desired_line)
         if match:
             knife_id = match.group(1)
+        
+    update_query = "UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s" #STUPID_HACK
+    cursor.execute(update_query, (knife_id, knife_name))
+    connection.commit()
 
+    last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id)
     new_knife = {
         'knife_name': knife_name,
         'knife_id': knife_id,
-        'min_price_with_fee': min_price_with_fee,
-        'min_price_without_fee': float(data['min_price_without_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()),
+        'current_min_price_with_fee': current_min_price_with_fee,
+        'current_min_price_without_fee': float(data['current_min_price_without_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()),
+        'last_min_price_with_fee': last_min_price_with_fee,
+        'last_min_price_without_fee': last_min_price_with_fee/1.15,
         'buy_order_price': buy_order_price,
-        'last_updated': datetime.datetime.now()
+        'last_updated': datetime.datetime.now(),
+        'last_sold': last_sold
     }
-    
     return new_knife
 
 def save_knife_to_db(knife, cursor, connection):
     if(knife):
-        update_query = "UPDATE knives SET knife_id = %s, min_price_with_fee = %s, min_price_without_fee = %s, buy_order_price = %s, last_updated = %s WHERE knives.knife_name = %s"
-        cursor.execute(update_query, (knife['knife_id'], knife['min_price_with_fee'], knife['min_price_without_fee'], knife['buy_order_price'], knife['last_updated'], knife['knife_name']))
+        update_query = "UPDATE knives SET knife_id = %s, current_min_price_with_fee = %s, current_min_price_without_fee = %s, last_min_price_with_fee = %s, last_min_price_without_fee = %s, buy_order_price = %s, last_updated = %s, last_sold = %s WHERE knives.knife_name = %s"
+        cursor.execute(update_query, (knife['knife_id'], knife['current_min_price_with_fee'], knife['current_min_price_without_fee'], knife['last_min_price_with_fee'], knife['last_min_price_without_fee'], knife['buy_order_price'], knife['last_updated'], knife['last_sold'], knife['knife_name']))
         
         connection.commit()
 
@@ -346,6 +350,9 @@ if __name__ == "__main__":
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
+    cloud_options = {}
+    cloud_options['goog:loggingPrefs'] = {'browser': 'ALL'}
+    options.set_capability('cloud:options', cloud_options)
     driver = webdriver.Chrome(options=options)
     driver.request_interceptor = interceptor
     knife_names = get_knife_list_from_db(cursor)
