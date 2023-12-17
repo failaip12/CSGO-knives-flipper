@@ -172,7 +172,8 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id):
 
         current_attempt += 1
         time.sleep(1)  # Adjust the wait time as needed
-
+    price = None
+    parsed_date = None
     # Parse the JSON string back to a Python object
     if console_log_result is not None:
         console_log_result_json = json.loads(console_log_result)
