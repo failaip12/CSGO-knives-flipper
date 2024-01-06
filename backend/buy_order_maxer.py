@@ -12,7 +12,7 @@ from mysql.connector import Error
 from steampy.client import SteamClient
 from steampy.models import GameOptions, Currency
 
-from main import get_knife_info, interceptor, save_knife_to_db
+from main import get_knife_info_GPT, interceptor, save_knife_to_db
 
 if __name__ == "__main__":
     load_dotenv()
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     assert isinstance(wallet_balance, Decimal)
     wallet_balance = float(wallet_balance)
     options = Options()
-    options.add_argument('--headless')
+    # options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     options.add_argument("user-data-dir=C:/Filip_projekti/CSGO-knives-flipper/backend/chrome-cache")
     driver = webdriver.Chrome(options=options)
@@ -64,20 +64,24 @@ if __name__ == "__main__":
         for knife_order in knife_orders:
             response = None
             knife_name = knife_order['item_name']
-            knife_listing = get_knife_info(knife_name, driver)
+            knife_listing = get_knife_info_GPT(knife_name, driver, cursor, connection)
+            if knife_listing == None:
+                continue
             save_knife_to_db(knife_listing, cursor, connection)
             current_buy_order_price = float(knife_order['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
             price_difference = knife_listing["buy_order_price"] - current_buy_order_price
+            print("--------------------------------------------------------------------------")
+            print(price_difference, knife_listing['knife_name'])
+            print("--------------------------------------------------------------------------")
             if (price_difference > 0) and (current_buy_order_price != wallet_balance):
-                print("--------------------------------------------------------------------------")
-                print(price_difference)
-                print("--------------------------------------------------------------------------")
                 buy_order_id = int(knife_order["order_id"])
                 try:
                     response = steam_client.market.cancel_buy_order(buy_order_id)
-                except:
+                except Exception as e:
+                    print(e)
                     print("ERROR: Failed to cancel the buy order on the knife " + knife_name + ", skipping...")
-                if(response and response['success'] != 1):
+                    continue
+                if(response.get('success') != 1):
                     continue
                 else:
                     print("INFO: Succsessfully canceled the buy order on the knife ", knife_name)
@@ -85,17 +89,17 @@ if __name__ == "__main__":
                     print("INFO: Current max buy order price is higher than the amount of money you have in wallet, setting the price to your wallet money as fallback", knife_name)
                     try:
                         response = steam_client.market.create_buy_order(knife_name, wallet_balance * 100, 1, GameOptions.CS, Currency.EURO)
-                    except:
-                        pass
+                    except Exception as e:
+                        print(e)
                 else:
                     try:
                         # print("---------------------------------------------------")
                         # print(knife_listing["buy_order_price"] * 100 + 5)
                         # print("---------------------------------------------------")
                         response = steam_client.market.create_buy_order(knife_name, knife_listing["buy_order_price"] * 100 + 5, 1, GameOptions.CS, Currency.EURO)
-                    except:
-                        pass
-                if(response and response['success'] != 1):
+                    except Exception as e:
+                        print(e)
+                if(response.get('success') != 1):
                     print("ERROR: Failed to create the buy order on the knife ", knife_name)
                     lost_knife_names.append(knife_name)
                 else:

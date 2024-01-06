@@ -149,12 +149,38 @@ def extract_knife_data_with_retry(driver, url):
         time.sleep(30)  # Wait for 30 seconds before retrying
     return data
 
-def get_and_save_historical_pricing(driver, cursor, connection, knife_id):
+def get_and_save_historical_pricing_helper(console_log_result_json, date_format, cursor, connection, knife_id):
+    price = None
+    parsed_date = None
+    for result in console_log_result_json['data']:
+        date_string = result[0][:-4]
+
+        parsed_date = datetime.datetime.strptime(date_string, date_format)
+        price = result[1]
+        sold_count = result[2]
+        select_query = "SELECT * FROM SellTimes WHERE sell_time = (%s)"
+        cursor.execute(select_query, (parsed_date,))
+        existing_date = cursor.fetchone()
+        date_id = None
+        if not existing_date:
+            insert_query = "INSERT INTO SellTimes (sell_time) VALUES (%s)"
+            cursor.execute(insert_query, (parsed_date,))
+            connection.commit()
+            date_id = cursor.lastrowid
+        else:
+            date_id = existing_date[0]
+        insert_query = "INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)"
+        cursor.execute(insert_query, (knife_id, date_id, price, sold_count))
+        connection.commit()
+    return (price, parsed_date)
+
+def get_and_save_historical_pricing(driver, cursor, connection, knife_id, knife_name):
         
     max_attempts = 3
     current_attempt = 0
     console_log_result = None
-
+    price = None
+    parsed_date = None
     while current_attempt < max_attempts:
         console_log_result = driver.execute_script(
             """
@@ -172,38 +198,24 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id):
 
         current_attempt += 1
         time.sleep(1)  # Adjust the wait time as needed
-    price = None
-    parsed_date = None
+
+    date_format = "%b %d %Y %H"
     # Parse the JSON string back to a Python object
     if console_log_result is not None:
         console_log_result_json = json.loads(console_log_result)
         if(console_log_result_json['data'] is not None):
-            for result in console_log_result_json['data']:
-                date_string = result[0][:-4]
-                date_format = "%b %d %Y %H"
-
-                parsed_date = datetime.datetime.strptime(date_string, date_format)
-                price = result[1]
-                sold_count = result[2]
-                select_query = "SELECT * FROM SellTimes WHERE sell_time = (%s)"
-                cursor.execute(select_query, (parsed_date,))
-                existing_date = cursor.fetchone()
-                date_id = None
-                if not existing_date:
-                    insert_query = "INSERT INTO SellTimes (sell_time) VALUES (%s)"
-                    cursor.execute(insert_query, (parsed_date,))
-                    connection.commit()
-                    date_id = cursor.lastrowid
-                else:
-                    date_id = existing_date[0]
-                insert_query = "INSERT INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)"
-                cursor.execute(insert_query, (knife_id, date_id, price, sold_count))
-                connection.commit()
-    
+            knife = get_knife_from_db(cursor, knife_name)
+            if(knife):
+                knife_date = knife[9]
+                knife_last_date = console_log_result_json['data'][len(console_log_result_json['data']) - 1][0][:-4]
+                parsed_knife_last_date = datetime.datetime.strptime(knife_last_date, date_format)
+                if(knife_date < parsed_knife_last_date):
+                    price, parsed_date = get_and_save_historical_pricing_helper(console_log_result_json, date_format, cursor, connection, knife_id) #OPTIMIZE THIS SHIT
+            else:
+                price, parsed_date = get_and_save_historical_pricing_helper(console_log_result_json, date_format, cursor, connection, knife_id)
     return (price, parsed_date)
-    
 
-def get_knife_info_GPT(knife_name, driver):
+def get_knife_info_GPT(knife_name, driver, cursor, connection):
     url = f"https://steamcommunity.com/market/listings/730/{knife_name}"
     
     # Extract knife data with retries
@@ -217,7 +229,7 @@ def get_knife_info_GPT(knife_name, driver):
     if len(data['buy_orders']) < 2 or len(data['current_min_price_with_fee']) < 1 or len(data['current_min_price_without_fee']) < 1:
         return None
     
-    if str(data['current_min_price_with_fee'][0]) == "Sold!":
+    if str(data['current_min_price_with_fee'][0].text) == "Sold!":
         return None
     # Process min_price_with_fee consistently
     current_min_price_with_fee = float(data['current_min_price_with_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
@@ -236,15 +248,17 @@ def get_knife_info_GPT(knife_name, driver):
             break
     
     if desired_line:
-        match = re.search(r'\(\s*(\d+)\s*\)', desired_line)
+        match = re.search(r'Market_LoadOrderSpread\(\s*(\d+)\s*\)', desired_line)
         if match:
             knife_id = match.group(1)
-        
+
     update_query = "UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s" #STUPID_HACK
     cursor.execute(update_query, (knife_id, knife_name))
     connection.commit()
 
-    last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id)
+    last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id, knife_name)
+    if(last_min_price_with_fee is None or last_sold is None):
+        return None
     new_knife = {
         'knife_name': knife_name,
         'knife_id': knife_id,
@@ -327,8 +341,13 @@ def get_knife_list_from_db(cursor):
     knife_list = cursor.fetchall()
     return knife_list
 
-if __name__ == "__main__":
+def get_knife_from_db(cursor, knife_name):
+    select_query = "SELECT * FROM knives WHERE knife_name = %s"
+    cursor.execute(select_query, (knife_name, ))
+    knife = cursor.fetchone()
+    return knife
 
+if __name__ == "__main__":
     try:
         connection = mysql.connector.connect(host='localhost',
                                             database='knives',
@@ -345,8 +364,7 @@ if __name__ == "__main__":
 
     except Error as e:
         print("Greška u konekciji ", e)
-    
-    #knife_names = get_knife_list_from_db(cursor)
+    knife_names = get_knife_list_from_db(cursor)
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
@@ -356,9 +374,15 @@ if __name__ == "__main__":
     options.set_capability('cloud:options', cloud_options)
     driver = webdriver.Chrome(options=options)
     driver.request_interceptor = interceptor
+    #parse_page(f"https://steamcommunity.com/market/listings/730/★ StatTrak™ Bowie Knife | Blue Steel (Field-Tested)", driver, 6)
+    #print(get_and_save_historical_pricing(driver, cursor, connection, 140020270, "★ StatTrak™ Bowie Knife | Blue Steel (Field-Tested)"))
+    #exit()
     knife_names = get_knife_list_from_db(cursor)
     for knife_name in tqdm(knife_names):
-        save_knife_to_db(get_knife_info_GPT(knife_name[0], driver), cursor, connection)
+        try:
+            save_knife_to_db(get_knife_info_GPT(knife_name[0], driver, cursor, connection), cursor, connection)
+        except:
+            continue
     exit()
     # knife_names = get_knife_list(driver)
     # add_new_knives_to_db(knife_names, cursor)
