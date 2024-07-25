@@ -18,15 +18,18 @@ USE `knives` ;
 -- Table `knives`.`Knives`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `knives`.`Knives` (
-  `knife_id` INT NOT NULL AUTO_INCREMENT,
+  `knife_id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `knife_name` VARCHAR(150) NOT NULL,
-  `current_min_price_with_fee` DECIMAL NULL,
-  `current_min_price_without_fee` DECIMAL NULL,
-  `last_min_price_with_fee` DECIMAL NULL,
-  `last_min_price_without_fee` DECIMAL NULL,
-  `buy_order_price` DECIMAL NULL,
-  `profit` DECIMAL GENERATED ALWAYS AS (last_min_price_without_fee - buy_order_price) VIRTUAL,
+  `current_min_price_with_fee` DECIMAL UNSIGNED NULL,
+  `current_min_price_without_fee` DECIMAL UNSIGNED NULL,
+  `last_min_price_with_fee` DECIMAL UNSIGNED NULL,
+  `last_min_price_without_fee` DECIMAL UNSIGNED NULL,
+  `buy_order_price` DECIMAL UNSIGNED NULL,
+  `profit` DECIMAL GENERATED ALWAYS AS (last_min_price_without_fee - buy_order_price) STORED,
   `last_updated` DATETIME NULL,
+  `last_sold` DATETIME NULL,
+  `amount_sold` INT UNSIGNED NOT NULL DEFAULT 0,
+  `selling_frequency` DECIMAL(10,2) NOT NULL DEFAULT 0,
   PRIMARY KEY (`knife_id`),
   UNIQUE INDEX `idKnives_UNIQUE` (`knife_id` ASC) VISIBLE,
   UNIQUE INDEX `min_price_with_fee_copy1_UNIQUE` (`knife_name` ASC) VISIBLE)

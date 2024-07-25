@@ -132,6 +132,6 @@ cython_debug/
 backend/chrome-cache/
 backend/.idea/
 backend/.env
-backend/test.py
 backend/a.html
 backend/tempCodeRunnerFile.py
+/.idea
