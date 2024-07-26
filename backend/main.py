@@ -24,7 +24,7 @@ def parse_page(url, driver, sleep_time):
 
 
 def interceptor(request):
-    '''
+    """
     request.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
     request.headers['Accept-Encoding'] = 'gzip, deflate, br'
     request.headers['Accept-Language'] = 'en-US,en;q=0.5'
@@ -36,7 +36,7 @@ def interceptor(request):
     request.headers['Upgrade-Insecure-Requests'] = '1'
     request.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT …/20100101 Firefox/115.0'
     request.headers['X-Amzn-Trace-Id'] = 'Root=1-64bbe270-19d868e26f99458b749c6728'
-    '''
+    """
     request.headers['Access-Control-Allow-Origin'] = '*'
 
 
@@ -67,22 +67,17 @@ def get_knife_list(driver):
         print("\n", len(knife_name_set))
         for name in names:
             knife_name_set.add(name.text.strip())
-
-    driver.quit()
     return knife_name_set
 
 
 def add_new_knives_to_db(names, cursor, connection):
     for name in tqdm(names):
-        new_knife = {
-            'knife_name': name
-        }
         select_query = "SELECT knife_name FROM knives WHERE knife_name = (%s)"
-        cursor.execute(select_query, (new_knife['knife_name'],))
+        cursor.execute(select_query, (name,))
         existing_knife = cursor.fetchone()
         if not existing_knife:
             insert_query = "INSERT INTO knives (knife_name) VALUES (%s)"
-            cursor.execute(insert_query, (new_knife['knife_name'],))
+            cursor.execute(insert_query, (name,))
             connection.commit()
 
 
@@ -170,7 +165,7 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
         console_log_result_json = json.loads(console_log_result)
         if console_log_result_json['data'] is not None:
             knife = get_knife_from_db(cursor, name)
-            if knife:
+            if knife and knife[9]:
                 knife_date = knife[9]
                 knife_last_date = console_log_result_json['data'][len(console_log_result_json['data']) - 1][0][:-4]
                 parsed_knife_last_date = datetime.datetime.strptime(knife_last_date, date_format)
@@ -198,13 +193,12 @@ def get_knife_info(name, driver, cursor, connection):
     if len(data['buy_orders']) < 2 or len(data['current_min_price_with_fee']) < 1 or len(
             data['current_min_price_without_fee']) < 1:
         return None
+    text = data['current_min_price_with_fee'][0].text.strip().replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "")
 
-    if str(data['current_min_price_with_fee'][0].text) == "Sold!":
+    try:
+        current_min_price_with_fee = float(text)
+    except:
         return None
-    # Process min_price_with_fee consistently
-    current_min_price_with_fee = float(
-        data['current_min_price_with_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ",
-                                                                                                                "").strip())
 
     buy_order_price = float(
         data['buy_orders'][1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
@@ -273,20 +267,11 @@ def get_knife_from_db(cursor, name):
     return knife
 
 
-if __name__ == "__main__":
+def connect_to_db(host, database, port, user, password):
     try:
-        sql_connection = mysql.connector.connect(host='localhost',
-                                                 database='knives',
-                                                 port='3306',
-                                                 user='root',
-                                                 password='')
+        sql_connection = mysql.connector.connect(host=host, database=database, port=port, user=user, password=password)
         if sql_connection.is_connected():
-            db_Info = sql_connection.get_server_info()
-            print("Povezan ", db_Info)
             sql_cursor = sql_connection.cursor()
-            sql_cursor.execute("select database();")
-            record = sql_cursor.fetchone()
-            print("Povezan sa bazom: ", record)
         else:
             print("Greška u konekciji")
             exit(1)
@@ -294,34 +279,24 @@ if __name__ == "__main__":
     except Error as e:
         print("Greška u konekciji ", e)
         exit(1)
+    return sql_connection, sql_cursor
 
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
-    cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
-    options.set_capability('cloud:options', cloud_options)
-    chrome_driver = webdriver.Chrome(options=options)
-    chrome_driver.request_interceptor = interceptor
-    # Update all knife data
-    knife_names = get_knife_list_from_db(sql_cursor)
-    for knife_name in tqdm(knife_names):
-        try:
-            knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection)
-            save_knife_to_db(knife_info, sql_cursor, sql_connection)
-        except:
-            continue
 
-    ''' Manually update cuz triggers are slow
-        UPDATE `knives`.`Knives` k
+def update_amount_sold(cursor):
+    update_query = '''
+    UPDATE `knives`.`Knives` k
     JOIN (
         SELECT `knife_id`, COUNT(*) AS `total_sold`
         FROM `knives`.`SellHistory`
         GROUP BY `knife_id`
     ) sh ON k.`knife_id` = sh.`knife_id`
     SET k.`amount_sold` = sh.`total_sold`;
+    '''
+    cursor.execute(update_query)
 
-    -- Update selling_frequency for all knives
+
+def update_selling_frequency(cursor):
+    update_query = '''
     UPDATE `knives`.`Knives` k
     JOIN (
         SELECT sh.`knife_id`, 
@@ -332,10 +307,37 @@ if __name__ == "__main__":
     ) sf ON k.`knife_id` = sf.`knife_id`
     SET k.`selling_frequency` = sf.`frequency`;
     '''
+    cursor.execute(update_query)
+
+
+def update_all_knife_data():
+    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
+    knife_names = get_knife_list_from_db(sql_cursor)    
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
+    cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
+    options.set_capability('cloud:options', cloud_options)
+    chrome_driver = webdriver.Chrome(options=options)
+    chrome_driver.request_interceptor = interceptor
+    for knife_name in tqdm(knife_names):
+        try:
+            knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection)
+            save_knife_to_db(knife_info, sql_cursor, sql_connection)
+        except Error as e:
+            print(f"Greška u azuriranju noza {knife_name[0]}", e)
+            continue
+
+    update_amount_sold(sql_cursor)
+    update_selling_frequency(sql_cursor)
 
     sql_cursor.close()
     sql_connection.close()
-    exit()
+
+
+if __name__ == "__main__":
+    update_all_knife_data()
 
     # Update Knife List
     # knife_names = get_knife_list(driver)
