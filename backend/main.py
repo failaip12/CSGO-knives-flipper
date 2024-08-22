@@ -72,12 +72,9 @@ def get_knife_list(driver):
 
 def add_new_knives_to_db(names, cursor, connection):
     for name in tqdm(names):
-        select_query = "SELECT knife_name FROM knives WHERE knife_name = (%s)"
-        cursor.execute(select_query, (name,))
-        existing_knife = cursor.fetchone()
-        if not existing_knife:
-            insert_query = "INSERT INTO knives (knife_name) VALUES (%s)"
-            cursor.execute(insert_query, (name,))
+        cursor.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
+        if cursor.fetchone() is None:
+            cursor.execute("INSERT INTO knives (knife_name) VALUES (%s)", (name,))
             connection.commit()
 
 
@@ -119,18 +116,15 @@ def get_and_save_historical_pricing_helper(console_log_result_json, date_format,
         parsed_date = datetime.datetime.strptime(date_string, date_format)
         price = result[1]
         sold_count = result[2]
-        select_query = "SELECT * FROM SellTimes WHERE sell_time = (%s)"
-        cursor.execute(select_query, (parsed_date,))
+        cursor.execute("SELECT * FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
         existing_date = cursor.fetchone()
         if not existing_date:
-            insert_query = "INSERT INTO SellTimes (sell_time) VALUES (%s)"
-            cursor.execute(insert_query, (parsed_date,))
+            cursor.execute("INSERT INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,))
             connection.commit()
             date_id = cursor.lastrowid
         else:
             date_id = existing_date[0]
-        insert_query = "INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)"
-        cursor.execute(insert_query, (knife_id, date_id, price, sold_count))
+        cursor.execute("INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)", (knife_id, date_id, price, sold_count))
         connection.commit()
     return price, parsed_date
 
@@ -219,9 +213,9 @@ def get_knife_info(name, driver, cursor, connection):
         if match:
             knife_id = match.group(1)
 
-    update_query = "UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s"  # STUPID_HACK
-    cursor.execute(update_query, (knife_id, name))
-    connection.commit()
+    if knife_id:
+        cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
+        connection.commit()
 
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id,
                                                                          name)
@@ -245,11 +239,20 @@ def get_knife_info(name, driver, cursor, connection):
 
 def save_knife_to_db(knife, cursor, connection):
     if knife:
-        update_query = "UPDATE knives SET knife_id = %s, current_min_price_with_fee = %s, current_min_price_without_fee = %s, last_min_price_with_fee = %s, last_min_price_without_fee = %s, buy_order_price = %s, last_updated = %s, last_sold = %s WHERE knives.knife_name = %s"
-        cursor.execute(update_query, (
-            knife['knife_id'], knife['current_min_price_with_fee'], knife['current_min_price_without_fee'],
-            knife['last_min_price_with_fee'], knife['last_min_price_without_fee'], knife['buy_order_price'],
-            knife['last_updated'], knife['last_sold'], knife['knife_name']))
+        cursor.execute(
+            """
+            UPDATE knives SET
+                knife_id = %s, current_min_price_with_fee = %s, current_min_price_without_fee = %s,
+                last_min_price_with_fee = %s, last_min_price_without_fee = %s, buy_order_price = %s,
+                last_updated = %s, last_sold = %s
+            WHERE knife_name = %s
+            """,
+            (
+                knife['knife_id'], knife['current_min_price_with_fee'], knife['current_min_price_without_fee'],
+                knife['last_min_price_with_fee'], knife['last_min_price_without_fee'], knife['buy_order_price'],
+                knife['last_updated'], knife['last_sold'], knife['knife_name']
+            )
+        )
         connection.commit()
 
 
@@ -261,10 +264,8 @@ def get_knife_list_from_db(cursor):
 
 
 def get_knife_from_db(cursor, name):
-    select_query = "SELECT * FROM knives WHERE knife_name = %s"
-    cursor.execute(select_query, (name,))
-    knife = cursor.fetchone()
-    return knife
+    cursor.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
+    return cursor.fetchone()
 
 
 def connect_to_db(host, database, port, user, password):
