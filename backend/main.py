@@ -342,14 +342,11 @@ def save_knife_to_db(knife, cursor, connection):
             connection.commit()
 
 
-def get_knife_list_from_db(cursor):
-    select_query = "SELECT knife_name FROM knives"
-    cursor.execute(select_query)
-    knife_list = cursor.fetchall()
-    return knife_list
-
-def get_knife_list_from_db_before_last_updated_date(cursor, date):
-    select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date}"
+def get_knife_list_from_db(cursor, date = None):
+    if(date is None):
+        select_query = "SELECT knife_name FROM knives"
+    else:
+        select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date}"
     cursor.execute(select_query)
     knife_list = cursor.fetchall()
     return knife_list
@@ -402,9 +399,9 @@ def update_selling_frequency(cursor):
     cursor.execute(update_query)
 
 
-def update_all_knife_data():
+def update_all_knife_data(date = None):
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
-    knife_names = get_knife_list_from_db(sql_cursor)    
+    knife_names = get_knife_list_from_db(sql_cursor, date)    
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--disable-gpu')
@@ -413,35 +410,6 @@ def update_all_knife_data():
     cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
     chrome_options.set_capability('cloud:options', cloud_options)   
 
-    seleniumwire_options = {
-        'connection_pool_maxsize': 20  # Set this to the desired pool size
-    }
-    chrome_driver = webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options)
-    chrome_driver.request_interceptor = interceptor
-    for knife_name in tqdm(knife_names):
-        try:
-            knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection)
-            save_knife_to_db(knife_info, sql_cursor, sql_connection)
-        except Error as e:
-            print(f"Greška u azuriranju noza {knife_name[0]}", e)
-            continue
-
-    update_amount_sold(sql_cursor)
-    update_selling_frequency(sql_cursor)
-
-    sql_cursor.close()
-    sql_connection.close()
-
-def update_all_knife_data_before_last_updated_date(date):
-    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
-    knife_names = get_knife_list_from_db_before_last_updated_date(sql_cursor, date)    
-    chrome_options = Options()
-    #chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
-    cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
-    chrome_options.set_capability('cloud:options', cloud_options)    
-    
     seleniumwire_options = {
         'connection_pool_maxsize': 20  # Set this to the desired pool size
     }
@@ -478,9 +446,10 @@ def update_all_knife_data_before_last_updated_date(date):
     sql_cursor.close()
     sql_connection.close()
 
+
 if __name__ == "__main__":#
     #update_all_knife_data()
-    update_all_knife_data_before_last_updated_date("'2024-11-03'")
+    update_all_knife_data("'2024-11-03'")
     time.sleep(1000)
     #get_knife_info("★ StatTrak™ Flip Knife | Bright Water (Battle-Scarred)")
     # Update Knife List
