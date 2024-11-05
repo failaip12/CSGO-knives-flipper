@@ -11,13 +11,15 @@ from selenium.webdriver.common.by import By
 from tqdm import tqdm
 from mysql.connector import Error
 
-
+from multiprocessing.dummy import Pool as ThreadPool
+import logging
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
 # https://steamcommunity.com/market/search?q=&category_730_ItemSet%5B%5D=any&category_730_ProPlayer%5B%5D=any&category_730_StickerCapsule%5B%5D=any&category_730_TournamentTeam%5B%5D=any&category_730_Weapon%5B%5D=any&category_730_Type%5B%5D=tag_CSGO_Type_Knife&appid=730#p1_name_asc
 
 def parse_page(url, driver, sleep_time):
     driver.get(url)
+    #driver.implicitly_wait(sleep_time)
     time.sleep(sleep_time)
     page = driver.page_source
     return page
@@ -57,7 +59,8 @@ def get_knife_list(driver):
         names = soup.find_all('span', class_='market_listing_item_name')
         error = soup.find_all("h3")
         while error or len(names) < 5 or names == new_names:
-            time.sleep(30)
+            driver.implicitly_wait(30)
+            #time.sleep(30)
             driver.execute_script("location.reload(true);")
             page = parse_page(base_url.format(page_num), driver, 6)
             soup = BeautifulSoup(page, "html.parser")
@@ -81,12 +84,18 @@ def add_new_knives_to_db(names, cursor, connection):
 def extract_knife_data(driver, url):
     driver.execute_script("location.reload(true);")
     page = parse_page(url, driver, 6)
+
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+
     soup = BeautifulSoup(page, "html.parser")
     buy_orders = soup.find_all('span', class_='market_commodity_orders_header_promote')
     current_min_price_with_fee = soup.find_all('span', class_='market_listing_price market_listing_price_with_fee')
-    current_min_price_without_fee = soup.find_all('span',
-                                                  class_='market_listing_price market_listing_price_without_fee')
+    current_min_price_without_fee = soup.find_all('span', class_='market_listing_price market_listing_price_without_fee')
     message = soup.find_all('div', class_='market_listing_table_message')
+    if len(message) == 0:
+        message_div = soup.find('div', id='message')
+        if(message_div is not None):
+            message = message_div.find('h3').text.strip()
     data = {
         'buy_orders': buy_orders,
         'current_min_price_with_fee': current_min_price_with_fee,
@@ -102,9 +111,14 @@ def extract_knife_data_with_retry(driver, url):
     data = None
     for _ in range(retries):
         data = extract_knife_data(driver, url)
-        if not data['message'] or "error" not in data['message'][0].text:
-            return data
-        time.sleep(30)  # Wait for 30 seconds before retrying
+        if(isinstance(data['message'], str)):
+            if "many" not in data['message']:
+                return data
+        else:
+            if not data['message'] or "error" not in data['message'][0].text or "many" not in data['message'][0].text:
+                return data
+        time.sleep(30)
+        #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
     return data
 
 
@@ -151,7 +165,8 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
                 break
 
         current_attempt += 1
-        time.sleep(1)  # Adjust the wait time as needed
+        #time.sleep(current_attempt)
+        driver.implicitly_wait(current_attempt)  # Adjust the wait time as needed
 
     date_format = "%b %d %Y %H"
     # Parse the JSON string back to a Python object
@@ -178,24 +193,61 @@ def get_knife_info(name, driver, cursor, connection):
 
     # Extract knife data with retries
     data = extract_knife_data_with_retry(driver, url)
-
     # Handle cases where there is an error message
-    if data['message'] and "error" in data['message'][0].text:
-        return None
+    if(isinstance(data['message'], str)):
+        if "many" not in data['message']:
+            logging.error(f"Steam buggin {name}")
+            return None
+    else:
+        if data['message'] and ("error" in data['message'][0].text or "many" in data['message'][0].text):
+            logging.error(f"Too many requests {name}")
+            time.sleep(60)
+            return None
+    
+    new_knife = {
+        'knife_name': name,
+        'knife_id': None,
+        'current_min_price_with_fee': None,
+        'current_min_price_without_fee': None,
+        'last_min_price_with_fee': None,
+        'last_min_price_without_fee': None,
+        'buy_order_price': None,
+        'last_updated': datetime.datetime.now(),
+        'last_sold': None
+    }
 
     # Handle cases where required data is not available
-    if len(data['buy_orders']) < 2 or len(data['current_min_price_with_fee']) < 1 or len(
-            data['current_min_price_without_fee']) < 1:
-        return None
-    text = data['current_min_price_with_fee'][0].text.strip().replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "")
+    buy_orders = True
+    if len(data['buy_orders']) < 2:
+        logging.error(f"No buy orders {name}")
+        buy_orders = False
+        #return None
+    
+    current_price = True
+    if len(data['current_min_price_with_fee']) < 1 or len(data['current_min_price_without_fee']) < 1:
+        logging.error(f"No current price {name}")
+        current_price = False
+        #return None
+    
+    current_min_price_with_fee = None
+    current_min_price_without_fee = None
+    if(current_price):
+        text = data['current_min_price_with_fee'][0].text.strip().replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "")
 
-    try:
-        current_min_price_with_fee = float(text)
-    except:
-        return None
-
-    buy_order_price = float(
-        data['buy_orders'][1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
+        try:
+            current_min_price_with_fee = float(text)
+        except Exception as e:
+            logging.error(f"Could not parse current_min_price_with_fee {text} for knife {name}: {e}")
+        
+        text = data['current_min_price_without_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()
+        try:
+            current_min_price_without_fee = float(text)
+        except Exception as e:
+            logging.error(f"Could not parse current_min_price_without_fee {text} for knife {name}: {e}")
+        
+    buy_order_price = None
+    if(buy_orders):
+        buy_order_price = float(data['buy_orders'][1].text.replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
 
     # Extract knife_id using regular expression
     knife_id = None
@@ -220,40 +272,74 @@ def get_knife_info(name, driver, cursor, connection):
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id,
                                                                          name)
     if last_min_price_with_fee is None or last_sold is None:
-        return None
+        logging.error(f"Could not process price history {name}")
+    last_min_price_without_fee = None
+    if(last_min_price_with_fee is not None):
+        last_min_price_without_fee = last_min_price_with_fee / 1.15
     new_knife = {
         'knife_name': name,
         'knife_id': knife_id,
         'current_min_price_with_fee': current_min_price_with_fee,
-        'current_min_price_without_fee': float(
-            data['current_min_price_without_fee'][0].text.replace(",", ".").replace("-", "0").replace("€", "").replace(
-                " ", "").strip()),
+        'current_min_price_without_fee': current_min_price_without_fee,
         'last_min_price_with_fee': last_min_price_with_fee,
-        'last_min_price_without_fee': last_min_price_with_fee / 1.15,
+        'last_min_price_without_fee': last_min_price_without_fee,
         'buy_order_price': buy_order_price,
         'last_updated': datetime.datetime.now(),
         'last_sold': last_sold
     }
     return new_knife
 
+def safe_get_knife_info(name, driver, cursor, connection):
+    """A wrapper that catches and logs errors for get_knife_info."""
+    try:
+        return get_knife_info(name[0], driver, cursor, connection)
+    except Exception as e:
+        logging.error(f"Error processing knife {name[0]}: {e}")
+        return None  # Return None or handle as needed
 
 def save_knife_to_db(knife, cursor, connection):
     if knife:
-        cursor.execute(
-            """
-            UPDATE knives SET
-                knife_id = %s, current_min_price_with_fee = %s, current_min_price_without_fee = %s,
-                last_min_price_with_fee = %s, last_min_price_without_fee = %s, buy_order_price = %s,
-                last_updated = %s, last_sold = %s
+        # Prepare the SQL update statement
+        update_fields = []
+        update_values = []
+        
+        # Check each field and build the query dynamically
+        if knife['knife_id'] is not None:
+            update_fields.append("knife_id = %s")
+            update_values.append(knife['knife_id'])
+        if knife['current_min_price_with_fee'] is not None:
+            update_fields.append("current_min_price_with_fee = %s")
+            update_values.append(knife['current_min_price_with_fee'])
+        if knife['current_min_price_without_fee'] is not None:
+            update_fields.append("current_min_price_without_fee = %s")
+            update_values.append(knife['current_min_price_without_fee'])
+        if knife['last_min_price_with_fee'] is not None:
+            update_fields.append("last_min_price_with_fee = %s")
+            update_values.append(knife['last_min_price_with_fee'])
+        if knife['last_min_price_without_fee'] is not None:
+            update_fields.append("last_min_price_without_fee = %s")
+            update_values.append(knife['last_min_price_without_fee'])
+        if knife['buy_order_price'] is not None:
+            update_fields.append("buy_order_price = %s")
+            update_values.append(knife['buy_order_price'])
+        if knife['last_updated'] is not None:
+            update_fields.append("last_updated = %s")
+            update_values.append(knife['last_updated'])
+        if knife['last_sold'] is not None:
+            update_fields.append("last_sold = %s")
+            update_values.append(knife['last_sold'])
+        
+        # If there are fields to update, construct the query
+        if update_fields:
+            update_query = f"""
+            UPDATE knives SET {', '.join(update_fields)}
             WHERE knife_name = %s
-            """,
-            (
-                knife['knife_id'], knife['current_min_price_with_fee'], knife['current_min_price_without_fee'],
-                knife['last_min_price_with_fee'], knife['last_min_price_without_fee'], knife['buy_order_price'],
-                knife['last_updated'], knife['last_sold'], knife['knife_name']
-            )
-        )
-        connection.commit()
+            """
+            update_values.append(knife['knife_name'])  # Add the knife_name for the WHERE clause
+            
+            # Execute the update query with the collected values
+            cursor.execute(update_query, update_values)
+            connection.commit()
 
 
 def get_knife_list_from_db(cursor):
@@ -262,6 +348,11 @@ def get_knife_list_from_db(cursor):
     knife_list = cursor.fetchall()
     return knife_list
 
+def get_knife_list_from_db_before_last_updated_date(cursor, date):
+    select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date}"
+    cursor.execute(select_query)
+    knife_list = cursor.fetchall()
+    return knife_list
 
 def get_knife_from_db(cursor, name):
     cursor.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
@@ -314,13 +405,18 @@ def update_selling_frequency(cursor):
 def update_all_knife_data():
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
     knife_names = get_knife_list_from_db(sql_cursor)    
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
+
     cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
-    options.set_capability('cloud:options', cloud_options)
-    chrome_driver = webdriver.Chrome(options=options)
+    chrome_options.set_capability('cloud:options', cloud_options)   
+
+    seleniumwire_options = {
+        'connection_pool_maxsize': 20  # Set this to the desired pool size
+    }
+    chrome_driver = webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options)
     chrome_driver.request_interceptor = interceptor
     for knife_name in tqdm(knife_names):
         try:
@@ -336,10 +432,57 @@ def update_all_knife_data():
     sql_cursor.close()
     sql_connection.close()
 
+def update_all_knife_data_before_last_updated_date(date):
+    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
+    knife_names = get_knife_list_from_db_before_last_updated_date(sql_cursor, date)    
+    chrome_options = Options()
+    #chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
+    cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
+    chrome_options.set_capability('cloud:options', cloud_options)    
+    
+    seleniumwire_options = {
+        'connection_pool_maxsize': 20  # Set this to the desired pool size
+    }
+    chrome_driver = webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options)
+    chrome_driver.request_interceptor = interceptor
+    get_knife_info("★ StatTrak™ Flip Knife | Bright Water (Battle-Scarred)", chrome_driver, sql_cursor, sql_connection)
+    #for knife_name in tqdm(knife_names):
+        #try:
+    #    knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection)
+    #    save_knife_to_db(knife_info, sql_cursor, sql_connection)
+        #except Error as e:
+        #    print(f"Greška u azuriranju noza {knife_name[0]}", e)
+        #    continue
+    '''
+    # Define the ThreadPool and number of threads
+    pool = ThreadPool(8)  # Adjust as needed
 
-if __name__ == "__main__":
-    update_all_knife_data()
+    # Wrap pool.imap_unordered() with tqdm to show progress
+    for knife_info in tqdm(
+        pool.imap_unordered(lambda name: safe_get_knife_info(name, chrome_driver, sql_cursor, sql_connection), knife_names),
+        total=len(knife_names),
+        desc="Processing knives"
+    ):
+        if knife_info is not None:
+            save_knife_to_db(knife_info, sql_cursor, sql_connection)  # Save immediately
 
+    pool.close()
+    pool.join()
+
+    '''
+    update_amount_sold(sql_cursor)
+    update_selling_frequency(sql_cursor)
+
+    sql_cursor.close()
+    sql_connection.close()
+
+if __name__ == "__main__":#
+    #update_all_knife_data()
+    update_all_knife_data_before_last_updated_date("'2024-11-03'")
+    time.sleep(1000)
+    #get_knife_info("★ StatTrak™ Flip Knife | Bright Water (Battle-Scarred)")
     # Update Knife List
     # knife_names = get_knife_list(driver)
     # add_new_knives_to_db(knife_names, cursor)
