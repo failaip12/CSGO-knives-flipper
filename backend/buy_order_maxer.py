@@ -43,12 +43,12 @@ if __name__ == "__main__":
     wallet_balance = steam_client.get_wallet_balance()
     assert isinstance(wallet_balance, Decimal)
     wallet_balance = float(wallet_balance)
-    options = Options()
+    #options = Options()
     # options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument("user-data-dir=C:/Filip_projekti/CSGO-knives-flipper/backend/chrome-cache")
-    driver = webdriver.Chrome(options=options)
-    driver.request_interceptor = interceptor
+    #options.add_argument('--disable-gpu')
+    #options.add_argument("user-data-dir=C:/Filip_projekti/CSGO-knives-flipper/backend/chrome-cache")
+    #driver = webdriver.Chrome(options=options)
+    #driver.request_interceptor = interceptor
 
     listings = steam_client.market.get_my_market_listings()
     knife_orders = list()
@@ -58,9 +58,26 @@ if __name__ == "__main__":
         game_name = actual_listing['game_name']
         item_name = actual_listing['item_name'].lower()
 
-        if game_name == "Counter-Strike 2" and any(
-                keyword in item_name for keyword in ["knife", "bayonet", "karambit", "shadow daggers"]):
-            knife_orders.append(actual_listing)
+        if game_name == "Counter-Strike 2" and any(keyword in item_name for keyword in ["knife", "bayonet", "karambit", "shadow daggers"]):
+            while True:
+                try:
+                    max_price = float(input(f"Set the maximum buy order for this item: {actual_listing.get('item_name')}, current buy order price: {actual_listing.get('price')}\n"))
+                    if(max_price > float(actual_listing.get('price').replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())):
+                        break
+                    else:
+                        print(f"Please provide a bigger price than {actual_listing.get('price')}")
+                except ValueError:
+                    print("Invalid input. Please enter a valid number.")
+
+            new_listing = actual_listing
+            new_listing['max_price'] = max_price
+            knife_orders.append(new_listing)
+    
+    for order in knife_orders:
+        print(f"Item: {order.get('item_name')}, current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
+    
+    exit(69)
+
     while True:
         if len(lost_knife_names) > 0:
             print("--------------------------------------------------------------------------")
@@ -69,17 +86,16 @@ if __name__ == "__main__":
         for knife_order in knife_orders:
             response = None
             knife_name = knife_order['item_name']
-            knife_listing = get_knife_info(knife_name, driver, cursor, connection)
+            knife_listing = get_knife_info(knife_name, driver, cursor, connection, 6)
             if knife_listing is None:
                 continue
             save_knife_to_db(knife_listing, cursor, connection)
-            current_buy_order_price = float(
-                knife_order['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
+            current_buy_order_price = float(knife_order['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
             price_difference = knife_listing["buy_order_price"] - current_buy_order_price
             print("--------------------------------------------------------------------------")
             print(price_difference, knife_listing['knife_name'])
             print("--------------------------------------------------------------------------")
-            if (price_difference > 0) and (current_buy_order_price != wallet_balance):
+            if (price_difference > 0) and (current_buy_order_price < wallet_balance):
                 buy_order_id = int(knife_order["order_id"])
                 try:
                     response = steam_client.market.cancel_buy_order(buy_order_id)
