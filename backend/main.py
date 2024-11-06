@@ -3,6 +3,12 @@ import time
 import re
 import json
 import logging
+import tempfile
+import shutil
+import os
+import random
+import string
+import sys
 
 import mysql.connector
 from bs4 import BeautifulSoup
@@ -11,6 +17,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import StaleElementReferenceException
 
 from tqdm import tqdm
 from mysql.connector import Error
@@ -69,7 +76,7 @@ def get_knife_list(driver, wait_time):
         error = soup.find_all("h3")
         while error or len(names) < 5 or names == new_names:
             #driver.implicitly_wait(30)
-            time.sleep(30)
+            time.sleep(10)
             driver.execute_script("location.reload(true);")
             page = parse_page(base_url.format(page_num), driver)
             WebDriverWait(driver, wait_time).until(
@@ -157,9 +164,9 @@ def extract_knife_data_with_retry(driver, url, wait_time):
             if "many" not in data['message']:
                 return data
         else:
-            if not data['message'] or "error" not in data['message'][0].text or "many" not in data['message'][0].text:
+            if not data['message'] or "error" not in data['message'][0].text or "too many requests" not in data['message'][0].text:
                 return data
-        time.sleep(30)
+        time.sleep(10)
         #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
     return data
 
@@ -243,16 +250,19 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     data = extract_knife_data_with_retry(driver, url, wait_time)
     current_price = True
     # Handle cases where there is an error message
+
     if(isinstance(data['message'], str)):
-        if "many" not in data['message']:
-            logging.error(f"Steam buggin {name}")
+        if "made too many requests" in data['message']:
+            logging.critical(f"Too many requests {name}, stopping...")
+            exit(1)
             return None
+        
         if "no listings" in data['message']:
             current_price = False
     else:
-        if data['message'] and ("error" in data['message'][0].text or "many" in data['message'][0].text):
-            logging.critical(f"Too many requests {name}, stopping...")
-            exit(1)
+        if data['message'] and data['message'][0].text: 
+            logging.error(f"Steam buggin {name}")
+            time.sleep(10)
             return None
     
     new_knife = {
@@ -305,19 +315,31 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     script_tags = driver.find_elements(By.TAG_NAME, 'script')
 
     for script_tag in script_tags:
-        javascript_code = script_tag.get_attribute('text')
-        if 'Market_LoadOrderSpread' in javascript_code:
-            desired_line = javascript_code.strip()
-            break
+        try:
+            # Attempt to get the JavaScript code from the script tag
+            javascript_code = script_tag.get_attribute('text')
+            
+            # Check for the specific pattern in the JavaScript code
+            if 'Market_LoadOrderSpread' in javascript_code:
+                desired_line = javascript_code.strip()
+                break
+
+        except StaleElementReferenceException:
+            # If stale, re-locate the elements and try again
+            script_tags = driver.find_elements(By.TAG_NAME, 'script')
+            continue  # Retry processing the elements after refinding them
 
     if desired_line:
         match = re.search(r'Market_LoadOrderSpread\(\s*(\d+)\s*\)', desired_line)
         if match:
             knife_id = match.group(1)
 
-    if knife_id:
-        cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
-        connection.commit()
+    #if knife_id:
+    #    print("--------------")
+    #    print(knife_id, name)
+    #    print("++++++++++++++")
+    #    cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
+    #    connection.commit()
 
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id,
                                                                          name)
@@ -344,10 +366,11 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     }
     return new_knife
 
-def safe_get_knife_info(name, driver, cursor, connection):
+def safe_get_knife_info(name, driver, cursor, connection, wait_time):
     """A wrapper that catches and logs errors for get_knife_info."""
     try:
-        return get_knife_info(name[0], driver, cursor, connection)
+        knife_info = get_knife_info(name[0], driver, cursor, connection, wait_time)
+        return knife_info
     except Exception as e:
         logging.error(f"Error processing knife {name[0]}: {e}")
         return None  # Return None or handle as needed
@@ -458,54 +481,102 @@ def update_selling_frequency(cursor):
     '''
     cursor.execute(update_query)
 
+def copy_user_data_dir(source_dir):
+    """
+    Copy the user data directory to a unique directory for each thread.
+    Ensures that the directory name is unique to avoid conflicts.
+    """
+    while True:
+        # Generate a truly unique temporary directory using random suffix
+        unique_suffix = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+        temp_dir = os.path.join(tempfile.gettempdir(), f"chrome_user_data_{unique_suffix}")
+        
+        # Ensure the directory doesn't already exist
+        if not os.path.exists(temp_dir):
+            break  # We found a unique directory, break the loop
+
+    # Now create the directory
+    os.makedirs(temp_dir)
+    # Copy the contents of the source directory to the unique directory
+    try:
+        shutil.copytree(source_dir, temp_dir, dirs_exist_ok=True)
+    except Exception as e:
+        print(f"Error copying directory: {e}")
+        shutil.rmtree(temp_dir)  # Cleanup in case of failure
+        raise e
+
+    return temp_dir
+
+def initialize_driver():
+    # Specify the original user data directory that you want to copy from
+    original_user_data_dir = "C:/Filip_projekti/steam amrket boi/chrome-cache"  # Original user data dir
+
+    # Copy the user-data-dir to a new unique directory for this thread
+    user_data_dir = copy_user_data_dir(original_user_data_dir)
+    
+    options = Options()
+    #options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument(f"user-data-dir={user_data_dir}")  # Use the copied unique user data dir per thread
+    
+    chrome_driver = webdriver.Chrome(options=options)
+    chrome_driver.request_interceptor = interceptor  # Attach interceptor here
+    return chrome_driver, user_data_dir
+
+def connect_to_db_threaded():
+    # Create a new connection per thread
+    return connect_to_db('localhost', 'knives', '3306', 'root', '')
+
+def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
+    connection, cursor = connect_to_db_threaded()
+    # Initialize the driver once per thread
+    driver, user_data_dir = initialize_driver()
+    result = []
+    for knife_name in knife_names:
+        knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time)
+        if knife_info:
+            save_knife_to_db(knife_info, cursor, connection)
+        progress_bar.update(1)
+
+    driver.quit()  # Quit the driver after all knives in this thread are processed
+    shutil.rmtree(user_data_dir)
+    return result
+
 
 def update_all_knife_data(date = None, wait_time = 6):
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
-    knife_names = get_knife_list_from_db(sql_cursor, date)    
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument("user-data-dir=C:/Filip_projekti/steam amrket boi/chrome-cache")
-    #chrome_options.add_argument('--log-level=3')
-    #chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-    cloud_options = {'goog:loggingPrefs': {'browser': 'ALL'}}
-    #cloud_options = ('goog:loggingPrefs', {'performance': 'OFF', 'browser': 'SEVERE'})
 
-    chrome_options.set_capability('cloud:options', cloud_options)   
-
-    seleniumwire_options = {
-        'connection_pool_maxsize': 20  # Set this to the desired pool size
-    }
-    chrome_driver = webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options)
-    chrome_driver.request_interceptor = interceptor
+    knife_names = get_knife_list_from_db(sql_cursor, date)
     #get_knife_info("★ Bayonet", chrome_driver, sql_cursor, sql_connection)
     #time.sleep(1000)
-    for knife_name in tqdm(knife_names):
+    #for knife_name in tqdm(knife_names):
         #try:
-        knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection, wait_time)
-        save_knife_to_db(knife_info, sql_cursor, sql_connection)
+        #knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection, wait_time)
+        #save_knife_to_db(knife_info, sql_cursor, sql_connection)
         #except Error as e:
         #    print(f"Greška u azuriranju noza {knife_name[0]}", e)
         #    continue
-    '''
     # Define the ThreadPool and number of threads
-    pool = ThreadPool(8)  # Adjust as needed
+    thread_count = 1
+    chunk_size = len(knife_names) // thread_count
+    knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
 
-    # Wrap pool.imap_unordered() with tqdm to show progress
-    for knife_info in tqdm(
-        pool.imap_unordered(lambda name: safe_get_knife_info(name, chrome_driver, sql_cursor, sql_connection), knife_names),
-        total=len(knife_names),
-        desc="Processing knives"
-    ):
-        if knife_info is not None:
-            save_knife_to_db(knife_info, sql_cursor, sql_connection)  # Save immediately
+    # Initialize tqdm for the overall progress of knives
+    total_knives = len(knife_names)
+    progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
+    # Function to update progress bar as each chunk finishes
+    with ThreadPool(thread_count) as pool:
+        # Use imap_unordered to process the chunks and update progress for each chunk
+        for _ in pool.imap_unordered(lambda chunk: fetch_all_knives_for_thread(chunk, wait_time, progress_bar), knife_name_chunks):
+            pass
+
+    progress_bar.close()  # Close the progress bar after completion
 
     pool.close()
     pool.join()
-
-    '''
-    #update_amount_sold(sql_cursor)
-    #update_selling_frequency(sql_cursor)
+    
+    update_amount_sold(sql_cursor)
+    update_selling_frequency(sql_cursor)
 
     sql_cursor.close()
     sql_connection.close()
@@ -516,10 +587,15 @@ if __name__ == "__main__":
         level=logging.ERROR,  # Set the logging level
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
-            logging.FileHandler("knives.log"),  # Log to a file named "app.log"
-            logging.StreamHandler()  # Log to the console
+            logging.FileHandler("knives.log", encoding='utf-8'),  # Set UTF-8 encoding for the file
+            logging.StreamHandler(sys.stdout)  # Log to the console
         ]
     )
+
+    # Update the StreamHandler to explicitly use UTF-8 encoding
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler):
+            handler.encoding = 'utf-8'
     #logging.getLogger("selenium").setLevel(logging.ERROR)
     #logging.getLogger("urllib3").setLevel(logging.WARNING)
     update_all_knife_data()
