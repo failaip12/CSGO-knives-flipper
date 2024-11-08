@@ -1,5 +1,6 @@
 import os
 import csv
+import shutil
 
 from decimal import Decimal, ROUND_CEILING
 import time
@@ -25,11 +26,27 @@ def get_price_from_user(actual_listing):
         except ValueError:
             print("Invalid input. Please enter a valid number.")
 
+def get_action_from_user():
+    print("Set the action if the buy order price goes above max. I or i to ignore, C or c to cancel the buy order.")
+    
+    user_input = input().strip().lower()
+
+    if user_input == 'c':
+        print("You chose to cancel the order.")
+        return 'cancel'
+    elif user_input == 'i':
+        print("You chose to ignore the order.")
+        return 'ignore'
+    else:
+        print("Invalid input, please press C or c, or I or i.")
+        return get_action_from_user()
+
 def set_all_prices(listings):
     knife_orders = list()
     for listing in listings:
         new_listing = listing
         new_listing['max_price'] = get_price_from_user(listing)
+        new_listing['action'] = get_action_from_user()
         knife_orders.append(new_listing)
     return knife_orders
 
@@ -54,20 +71,17 @@ def add_knives_to_csv(knives_to_add, file_path):
     for knife in knives_to_add:
         if 'max_price' not in knife:
             knife['max_price'] = get_price_from_user(knife)
-    # Step 1: Open the CSV file in append mode and write new rows
+        if 'action' not in knife:
+            knife['action'] = get_action_from_user()
     with open(file_path, 'a', newline='', encoding='utf-8') as file:
-        # Get the fieldnames from the first item in the list
         fieldnames = knives_to_add[0].keys()
         
-        # Create a CSV DictWriter to append rows to the file
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         
-        # Check if the file is empty (if it has no header), write header if necessary
-        file.seek(0, 2)  # Move to the end of the file
+        file.seek(0, 2)
         if file.tell() == 0:
             writer.writeheader()
         
-        # Step 2: Write the new rows to the CSV file
         writer.writerows(knives_to_add)
 
     #print(f"{len(knives_to_add)} knives added successfully.")
@@ -75,14 +89,12 @@ def add_knives_to_csv(knives_to_add, file_path):
 def delete_knives_from_csv(knives_to_delete, file_path):
     if(len(knives_to_delete) < 1):
         return
-    column_to_check = "item_name"  # Column to check for identifying the row
+    column_to_check = "item_name"
 
-    # Step 1: Read all rows from the CSV and filter out rows to delete
     with open(file_path, 'r', encoding='utf-8') as file:
         reader = csv.DictReader(file)
         rows = [row for row in reader if row[column_to_check] not in knives_to_delete]
 
-    # Step 2: Write the filtered rows back to the CSV
     with open(file_path, 'w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=reader.fieldnames)
         writer.writeheader()
@@ -135,23 +147,20 @@ def check_for_missing_orders(actual, file, file_path):
 def handle_user_choice():
     print("If you want to cancel the order press C or c, if you want to put a new max price press N or n, if you want to ignore this press I or i")
     
-    user_input = input().strip().lower()  # Use .lower() to handle both uppercase and lowercase input
+    user_input = input().strip().lower()
 
     if user_input == 'c':
         print("You chose to cancel the order.")
-        # Add logic to cancel the order here
         return 'cancel'
     elif user_input == 'n':
         print("You chose to put a new max price.")
-        # Add logic to update the max price here
         return 'new_max_price'
     elif user_input == 'i':
         print("You chose to ignore the order.")
-        # Add logic to ignore the order here
         return 'ignore'
     else:
         print("Invalid input, please press C, N, or I.")
-        return handle_user_choice()  # Prompt again if the input is invalid
+        return handle_user_choice()
 
 def cancel_order(order):
     try:
@@ -212,7 +221,7 @@ if __name__ == "__main__":
     #    ]
     #)
     connection, cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
-    driver, _ = initialize_driver(True)
+    driver, user_data_dir = initialize_driver(True)
     login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
     steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'], login_cookies=login_cookies)
     assert steam_client.was_login_executed
@@ -264,40 +273,50 @@ if __name__ == "__main__":
         print(f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
     
     while True:
-        wallet_balance = steam_client.get_wallet_balance()
-        assert isinstance(wallet_balance, Decimal)
-        wallet_balance = float(wallet_balance)
+        try:
+            wallet_balance = steam_client.get_wallet_balance()
+            assert isinstance(wallet_balance, Decimal)
+            wallet_balance = float(wallet_balance)
 
-        #TODO: The code below assumes that the wallet balance doesnt change and that no buy orders go through
+            #TODO: The code below assumes that the wallet balance doesnt change and that no buy orders go through, 
+            # and it doesnt check the consistency between csv file and the actual buy orders
 
-        for knife_order in knife_orders_file:
-            knife_name = knife_order['item_name']
-            knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6)
-            if knife_listing is None:
-                continue
-            save_knife_to_db(knife_listing, cursor, connection)
-            current_buy_order_price = float(knife_order['price'])
-            price_difference = knife_listing["buy_order_price"] - current_buy_order_price
-            if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])): #TODO: Handle the cases where current_buy_order_price > max_price
-                if(cancel_order(knife_order)):
-                    if knife_listing["buy_order_price"] < wallet_balance:
-                        succsess, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
-                        if(succsess):
-                            delete_knives_from_csv([knife_name], file_path)
-                            new_order = knife_order
-                            new_order['price'] = round_up_decimal(knife_listing["buy_order_price"] + 0.01)
-                            new_order['order_id'] = id
-                            add_knives_to_csv([new_order], file_path)
-                    else:
-                        succsess, id = put_order(knife_listing, wallet_balance*100)
-                        if(succsess):
-                            delete_knives_from_csv([knife_name], file_path)
-                            new_order = knife_order
-                            new_order['price'] = round_up_decimal(wallet_balance)
-                            new_order['order_id'] = id
-                            add_knives_to_csv([new_order], file_path)
-                        
-        knife_orders_file = load_orders_from_csv(file_path)
-        sleep_seconds = 300
-        print(f"INFO: Sleeping for {sleep_seconds} seconds")
-        time.sleep(sleep_seconds)
+            for knife_order in knife_orders_file:
+                knife_name = knife_order['item_name']
+                knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6)
+                if knife_listing is None:
+                    continue
+                save_knife_to_db(knife_listing, cursor, connection)
+                current_buy_order_price = float(knife_order['price'])
+                price_difference = knife_listing["buy_order_price"] - current_buy_order_price
+                if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])):
+                    if(cancel_order(knife_order)):
+                        if knife_listing["buy_order_price"] < wallet_balance:
+                            succsess, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
+                            if(succsess):
+                                delete_knives_from_csv([knife_name], file_path)
+                                new_order = knife_order
+                                new_order['price'] = round_up_decimal(knife_listing["buy_order_price"] + 0.01)
+                                new_order['order_id'] = id
+                                add_knives_to_csv([new_order], file_path)
+                        else:
+                            succsess, id = put_order(knife_listing, wallet_balance*100)
+                            if(succsess):
+                                delete_knives_from_csv([knife_name], file_path)
+                                new_order = knife_order
+                                new_order['price'] = round_up_decimal(wallet_balance)
+                                new_order['order_id'] = id
+                                add_knives_to_csv([new_order], file_path)
+                elif(current_buy_order_price >= float(knife_order["max_price"])):
+                    if(knife_order.get('action') == 'cancel' and cancel_order(knife_order)):
+                        print(f"Canceled order on knife {knife_name} because price is bigger than maximum set.")
+                    
+                            
+            knife_orders_file = load_orders_from_csv(file_path)
+            sleep_seconds = 300
+            print(f"INFO: Sleeping for {sleep_seconds} seconds")
+            time.sleep(sleep_seconds)
+        except KeyboardInterrupt:
+            print("\nINFO: Canceling loop and shutting down...")
+            break
+    shutil.rmtree(user_data_dir)
