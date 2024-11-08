@@ -51,7 +51,7 @@ def interceptor(request):
     """
     request.headers['Access-Control-Allow-Origin'] = '*'
 
-
+#TODO: Multithread this b
 def get_knife_list(driver, wait_time):
     range_start = 0
     base_url = "https://steamcommunity.com/market/search?q=&category_730_ItemSet[]=any&category_730_ProPlayer[]=any&category_730_StickerCapsule[]=any&category_730_TournamentTeam[]=any&category_730_Weapon[]=any&category_730_Type[]=tag_CSGO_Type_Knife&appid=730#p{}_name_asc"
@@ -170,7 +170,7 @@ def extract_knife_data_with_retry(driver, url, wait_time):
         #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
     return data
 
-
+#TODO: Optimize this b
 def get_and_save_historical_pricing_helper(console_log_result_json, date_format, cursor, connection, knife_id):
     price = None
     parsed_date = None
@@ -234,7 +234,7 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
         if knife_date < parsed_knife_last_date:
             price, parsed_date = get_and_save_historical_pricing_helper(console_log_result_json, date_format,
                                                                         cursor, connection,
-                                                                        knife_id)  # OPTIMIZE THIS SHIT
+                                                                        knife_id)
         else:
             parsed_date = parsed_knife_last_date
             price = float(knife[4])
@@ -509,7 +509,7 @@ def copy_user_data_dir(source_dir):
 
 def initialize_driver(headless):
     # Specify the original user data directory that you want to copy from
-    original_user_data_dir = "C:/Filip_projekti/steam amrket boi/chrome-cache"  # Original user data dir
+    original_user_data_dir = "C:/Filip_projekti/steam amrket boi/chrome-cache"  #TODO: Use pathlib and relative paths
 
     # Copy the user-data-dir to a new unique directory for this thread
     user_data_dir = copy_user_data_dir(original_user_data_dir)
@@ -532,7 +532,7 @@ def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
     connection, cursor = connect_to_db_threaded()
     # Initialize the driver once per thread
     driver, user_data_dir = initialize_driver(True)
-    result = []
+    #TODO: Batch DB operations
     for knife_name in knife_names:
         knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time)
         if knife_info:
@@ -541,7 +541,6 @@ def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
 
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
-    return result
 
 
 def update_all_knife_data(date = None, wait_time = 6):

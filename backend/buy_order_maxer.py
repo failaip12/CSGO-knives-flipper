@@ -101,7 +101,9 @@ def load_orders_from_csv(file_path):
         for row in reader:
             data.append(dict(row))
     return data
-
+#TODO: Handle the differences properly
+#Difference found in order ★ StatTrak™ Bowie Knife | Autotronic (Minimal Wear)
+#  Column 'price': '224.60' (actual) vs '224.6' (file
 def compare_orders(actual, file, file_path):
     dict2 = {item['item_name']: item for item in file}
     missing = list()
