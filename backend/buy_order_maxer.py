@@ -270,12 +270,12 @@ if __name__ == "__main__":
             save_knife_to_db(knife_listing, cursor, connection)
             current_buy_order_price = float(knife_order['price'])
             price_difference = knife_listing["buy_order_price"] - current_buy_order_price
-            if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])):
+            if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])): #TODO: Handle the cases where current_buy_order_price > max_price
                 if(cancel_order(knife_order)):
                     if knife_listing["buy_order_price"] < wallet_balance:
                         succsess, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
                         if(succsess):
-                            delete_knives_from_csv([knife_order], file_path)
+                            delete_knives_from_csv([knife_name], file_path)
                             new_order = knife_order
                             new_order['price'] = round_up_decimal(knife_listing["buy_order_price"] + 0.01)
                             new_order['order_id'] = id
@@ -283,11 +283,13 @@ if __name__ == "__main__":
                     else:
                         succsess, id = put_order(knife_listing, wallet_balance*100)
                         if(succsess):
-                            delete_knives_from_csv([knife_order], file_path)
+                            delete_knives_from_csv([knife_name], file_path)
                             new_order = knife_order
                             new_order['price'] = round_up_decimal(wallet_balance)
                             new_order['order_id'] = id
                             add_knives_to_csv([new_order], file_path)
                         
         knife_orders_file = load_orders_from_csv(file_path)
-        time.sleep(300)
+        sleep_seconds = 300
+        print(f"INFO: Sleeping for {sleep_seconds}")
+        time.sleep(sleep_seconds)
