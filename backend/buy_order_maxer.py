@@ -216,7 +216,7 @@ def get_wallet_balance(steam_client):
             assert isinstance(wallet_balance, Decimal)
             wallet_balance = float(wallet_balance)
             return True, wallet_balance
-        except ConnectionError:
+        except Exception:
             print("ERROR: Failed to get wallet balance sleeping for 30 seconds then trying again")
             time.sleep(30)
             return False, -1
