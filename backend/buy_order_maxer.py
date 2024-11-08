@@ -293,5 +293,5 @@ if __name__ == "__main__":
                         
         knife_orders_file = load_orders_from_csv(file_path)
         sleep_seconds = 300
-        print(f"INFO: Sleeping for {sleep_seconds}")
+        print(f"INFO: Sleeping for {sleep_seconds} seconds")
         time.sleep(sleep_seconds)
