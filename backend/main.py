@@ -507,7 +507,7 @@ def copy_user_data_dir(source_dir):
 
     return temp_dir
 
-def initialize_driver():
+def initialize_driver(headless):
     # Specify the original user data directory that you want to copy from
     original_user_data_dir = "C:/Filip_projekti/steam amrket boi/chrome-cache"  # Original user data dir
 
@@ -515,7 +515,8 @@ def initialize_driver():
     user_data_dir = copy_user_data_dir(original_user_data_dir)
     
     options = Options()
-    #options.add_argument('--headless')
+    if(headless):
+        options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     options.add_argument(f"user-data-dir={user_data_dir}")  # Use the copied unique user data dir per thread
     
@@ -530,7 +531,7 @@ def connect_to_db_threaded():
 def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
     connection, cursor = connect_to_db_threaded()
     # Initialize the driver once per thread
-    driver, user_data_dir = initialize_driver()
+    driver, user_data_dir = initialize_driver(True)
     result = []
     for knife_name in knife_names:
         knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time)
