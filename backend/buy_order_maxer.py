@@ -264,6 +264,12 @@ if __name__ == "__main__":
         print(f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
     
     while True:
+        wallet_balance = steam_client.get_wallet_balance()
+        assert isinstance(wallet_balance, Decimal)
+        wallet_balance = float(wallet_balance)
+
+        #TODO: The code below assumes that the wallet balance doesnt change and that no buy orders go through
+
         for knife_order in knife_orders_file:
             knife_name = knife_order['item_name']
             knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6)
