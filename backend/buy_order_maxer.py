@@ -1,7 +1,7 @@
 import os
 import csv
 import shutil
-
+from requests import ConnectionError
 from decimal import Decimal, ROUND_CEILING
 import time
 from dotenv import load_dotenv
@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from steampy.client import SteamClient
 from steampy.models import GameOptions, Currency
 
-from main import safe_get_knife_info, save_knife_to_db, connect_to_db, initialize_driver
+from main import safe_get_knife_info, save_knives_to_db, connect_to_db, initialize_driver
 
 def round_up_decimal(number):
     return float(Decimal(str(number)).quantize(Decimal('0.01'), rounding=ROUND_CEILING))
@@ -172,7 +172,7 @@ def cancel_order(order):
     if response.get('success') != 1:
         return False
     else:
-        print(f"INFO: Succsessfully canceled the buy order on the knife {order.get('item_name')} at price {order.get('price')}")
+        print(f"INFO: Successfully canceled the buy order on the knife {order.get('item_name')} at price {order.get('price')}")
         return True
 
 def put_order(listing, price):
@@ -186,7 +186,7 @@ def put_order(listing, price):
     if response.get('success') != 1:
         return False, -1
     else:
-        print(f"INFO: Succsessfully put the buy order on the knife {listing.get('knife_name')} at price {price / 100.0}")
+        print(f"INFO: Successfully put the buy order on the knife {listing.get('knife_name')} at price {price / 100.0}")
         return True, int(response.get('buy_orderid'))
 
 def cancel_orders(orders):
@@ -210,6 +210,17 @@ def amend_orders(orders):
     add_knives_to_csv(successfully_amended, file_path)
     return unsuccessfully_amended
 
+def get_wallet_balance(steam_client):
+        try:
+            wallet_balance = steam_client.get_wallet_balance()
+            assert isinstance(wallet_balance, Decimal)
+            wallet_balance = float(wallet_balance)
+            return True, wallet_balance
+        except ConnectionError:
+            print("ERROR: Failed to get wallet balance sleeping for 30 seconds then trying again")
+            time.sleep(30)
+            return False, -1
+
 if __name__ == "__main__":
     load_dotenv()
     #logging.basicConfig(
@@ -225,9 +236,9 @@ if __name__ == "__main__":
     login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
     steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'], login_cookies=login_cookies)
     assert steam_client.was_login_executed
-    wallet_balance = steam_client.get_wallet_balance()
-    assert isinstance(wallet_balance, Decimal)
-    wallet_balance = float(wallet_balance)
+    success, wallet_balance = get_wallet_balance(steam_client)
+    while(not success):
+        success, wallet_balance = get_wallet_balance(steam_client)
 
     listings = steam_client.market.get_my_market_listings()
     knife_orders_actual = filter_listings_to_knives(listings)
@@ -274,10 +285,9 @@ if __name__ == "__main__":
     
     while True:
         try:
-            wallet_balance = steam_client.get_wallet_balance()
-            assert isinstance(wallet_balance, Decimal)
-            wallet_balance = float(wallet_balance)
-
+            success, wallet_balance = get_wallet_balance(steam_client)
+            if(not success):
+                continue
             #TODO: The code below assumes that the wallet balance doesnt change and that no buy orders go through, 
             # and it doesnt check the consistency between csv file and the actual buy orders
 
@@ -286,22 +296,22 @@ if __name__ == "__main__":
                 knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6)
                 if knife_listing is None:
                     continue
-                save_knife_to_db(knife_listing, cursor, connection)
+                save_knives_to_db([knife_listing], cursor, connection)
                 current_buy_order_price = float(knife_order['price'])
                 price_difference = knife_listing["buy_order_price"] - current_buy_order_price
                 if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])):
                     if(cancel_order(knife_order)):
                         if knife_listing["buy_order_price"] < wallet_balance:
-                            succsess, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
-                            if(succsess):
+                            success, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
+                            if(success):
                                 delete_knives_from_csv([knife_name], file_path)
                                 new_order = knife_order
                                 new_order['price'] = round_up_decimal(knife_listing["buy_order_price"] + 0.01)
                                 new_order['order_id'] = id
                                 add_knives_to_csv([new_order], file_path)
                         else:
-                            succsess, id = put_order(knife_listing, wallet_balance*100)
-                            if(succsess):
+                            success, id = put_order(knife_listing, wallet_balance*100)
+                            if(success):
                                 delete_knives_from_csv([knife_name], file_path)
                                 new_order = knife_order
                                 new_order['price'] = round_up_decimal(wallet_balance)

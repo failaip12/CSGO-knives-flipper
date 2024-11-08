@@ -18,7 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import StaleElementReferenceException
-
+from bisect import bisect_left
 from tqdm import tqdm
 from mysql.connector import Error
 
@@ -171,14 +171,16 @@ def extract_knife_data_with_retry(driver, url, wait_time):
     return data
 
 #TODO: Optimize this b
-def get_and_save_historical_pricing_helper(console_log_result_json, date_format, cursor, connection, knife_id):
+def get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id):
     price = None
     parsed_date = None
-    for result in console_log_result_json['data']:
+    #TODO: Batch insert
+    for result in data:
         date_string = result[0][:-4]
         parsed_date = datetime.datetime.strptime(date_string, date_format)
         price = result[1]
         sold_count = result[2]
+        #TODO:           sell_time_id
         cursor.execute("SELECT * FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
         existing_date = cursor.fetchone()
         if not existing_date:
@@ -187,6 +189,7 @@ def get_and_save_historical_pricing_helper(console_log_result_json, date_format,
             date_id = cursor.lastrowid
         else:
             date_id = existing_date[0]
+        #TODO: IGNORE should in theory be unnecessary
         cursor.execute("INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)", (knife_id, date_id, price, sold_count))
         connection.commit()
     return price, parsed_date
@@ -219,27 +222,33 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
     if console_log_result is None:
         logging.error(f"Could not execute javascript {name}")
         return None, None
-    
     console_log_result_json = json.loads(console_log_result)
-    if console_log_result_json['data'] is None:
+    data = console_log_result_json['data'] #date, price, count
+    if data is None:
         logging.error(f"Could not parse json {name}")
         return None, None
     
     date_format = "%b %d %Y %H"
     knife = get_knife_from_db(cursor, name)
-    if knife and knife[9]:
+    if knife and knife[9]: #Check if it exists and has a date
         knife_date = knife[9]
-        knife_last_date = console_log_result_json['data'][len(console_log_result_json['data']) - 1][0][:-4]
+        knife_last_date = data[len(data) - 1][0][:-4]
         parsed_knife_last_date = datetime.datetime.strptime(knife_last_date, date_format)
+
+        dates = [datetime.datetime.strptime(entry[0][:-4], date_format) for entry in data]
+
+        index = bisect_left(dates, knife_date)
+
+        filtered_data = data[index + 1:]
         if knife_date < parsed_knife_last_date:
-            price, parsed_date = get_and_save_historical_pricing_helper(console_log_result_json, date_format,
+            price, parsed_date = get_and_save_historical_pricing_helper(filtered_data, date_format,
                                                                         cursor, connection,
                                                                         knife_id)
         else:
             parsed_date = parsed_knife_last_date
             price = float(knife[4])
     else:
-        price, parsed_date = get_and_save_historical_pricing_helper(console_log_result_json, date_format, cursor, connection, knife_id)
+        price, parsed_date = get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id)
     return price, parsed_date
 
 
@@ -340,7 +349,6 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     #    print("++++++++++++++")
     #    cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
     #    connection.commit()
-
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id,
                                                                          name)
     if last_min_price_with_fee is None or last_sold is None:
@@ -375,54 +383,42 @@ def safe_get_knife_info(name, driver, cursor, connection, wait_time):
         logging.error(f"Error processing knife {name[0]}: {e}")
         return None  # Return None or handle as needed
 
-def save_knife_to_db(knife, cursor, connection):
-    if knife:
-        # Prepare the SQL update statement
-        update_fields = []
-        update_values = []
-        
-        # Check each field and build the query dynamically
-        if knife['knife_id'] is not None:
-            update_fields.append("knife_id = %s")
-            update_values.append(knife['knife_id'])
-        
-        update_fields.append("current_min_price_with_fee = %s")
-        update_values.append(knife['current_min_price_with_fee'])
-        
-        update_fields.append("current_min_price_without_fee = %s")
-        update_values.append(knife['current_min_price_without_fee'])
-        
-        if knife['last_min_price_with_fee'] is not None:
-            update_fields.append("last_min_price_with_fee = %s")
-            update_values.append(knife['last_min_price_with_fee'])
-        
-        if knife['last_min_price_without_fee'] is not None:
-            update_fields.append("last_min_price_without_fee = %s")
-            update_values.append(knife['last_min_price_without_fee'])
-        
-        if knife['buy_order_price'] is not None:
-            update_fields.append("buy_order_price = %s")
-            update_values.append(knife['buy_order_price'])
-        
-        if knife['last_updated'] is not None:
-            update_fields.append("last_updated = %s")
-            update_values.append(knife['last_updated'])
-        
-        if knife['last_sold'] is not None:
-            update_fields.append("last_sold = %s")
-            update_values.append(knife['last_sold'])
-        
-        # If there are fields to update, construct the query
-        if update_fields:
-            update_query = f"""
-            UPDATE knives SET {', '.join(update_fields)}
-            WHERE knife_name = %s
-            """
-            update_values.append(knife['knife_name'])  # Add the knife_name for the WHERE clause
-            
-            # Execute the update query with the collected values
-            cursor.execute(update_query, update_values)
-            connection.commit()
+def save_knives_to_db(knives, cursor, connection):
+    if not knives:
+        return
+    
+    # Prepare the base update query
+    base_query = """
+        UPDATE knives SET
+            current_min_price_with_fee = %s,
+            current_min_price_without_fee = %s,
+            last_min_price_with_fee = %s,
+            last_min_price_without_fee = %s,
+            buy_order_price = %s,
+            last_updated = %s,
+            last_sold = %s
+        WHERE knife_name = %s
+    """
+    
+    # Create a list of tuples with values for each knife
+    values = []
+    for knife in knives:
+        # Populate the fields and handle optional fields with None
+        values.append((
+            knife.get('current_min_price_with_fee'),
+            knife.get('current_min_price_without_fee'),
+            knife.get('last_min_price_with_fee'),
+            knife.get('last_min_price_without_fee'),
+            knife.get('buy_order_price'),
+            knife.get('last_updated'),
+            knife.get('last_sold'),
+            knife['knife_name']  # WHERE clause value
+        ))
+    
+    # Execute the batch update
+    cursor.executemany(base_query, values)
+    connection.commit()
+
 
 
 def get_knife_list_from_db(cursor, date = None):
@@ -529,15 +525,20 @@ def connect_to_db_threaded():
     return connect_to_db('localhost', 'knives', '3306', 'root', '')
 
 def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
+    batch_size = 15
     connection, cursor = connect_to_db_threaded()
     # Initialize the driver once per thread
     driver, user_data_dir = initialize_driver(True)
-    #TODO: Batch DB operations
+    batch = list()
     for knife_name in knife_names:
         knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time)
         if knife_info:
-            save_knife_to_db(knife_info, cursor, connection)
+            batch.append(knife_info)
+            
         progress_bar.update(1)
+        if(len(batch) == batch_size):
+            save_knives_to_db(batch, cursor, connection)
+            batch.clear()
 
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
@@ -552,12 +553,12 @@ def update_all_knife_data(date = None, wait_time = 6):
     #for knife_name in tqdm(knife_names):
         #try:
         #knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection, wait_time)
-        #save_knife_to_db(knife_info, sql_cursor, sql_connection)
+        #save_knife_to_db([knife_info], sql_cursor, sql_connection)
         #except Error as e:
         #    print(f"Greška u azuriranju noza {knife_name[0]}", e)
         #    continue
     # Define the ThreadPool and number of threads
-    thread_count = 1
+    thread_count = 8
     chunk_size = len(knife_names) // thread_count
     knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
 
@@ -599,6 +600,12 @@ if __name__ == "__main__":
     #logging.getLogger("selenium").setLevel(logging.ERROR)
     #logging.getLogger("urllib3").setLevel(logging.WARNING)
     update_all_knife_data()
+    #connection, cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
+    #knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
+    #driver, user_data_dir = initialize_driver(False)
+    #knife_info = safe_get_knife_info([knife_name], driver, cursor, connection, 6)
+    #driver.quit()
+    #shutil.rmtree(user_data_dir)
     #update_all_knife_data("'2024-11-03'")
     #get_knife_info("★ StatTrak™ Flip Knife | Bright Water (Battle-Scarred)")
     # Update Knife List
