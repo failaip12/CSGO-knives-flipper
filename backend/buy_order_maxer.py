@@ -302,7 +302,7 @@ if __name__ == "__main__":
                     print(f"Buy order price is None {knife_name}")
                     continue
                 price_difference = knife_listing["buy_order_price"] - current_buy_order_price
-                if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])):
+                if (price_difference > 0) and (knife_listing["buy_order_price"] < float(knife_order["max_price"])):
                     if(cancel_order(knife_order)):
                         if knife_listing["buy_order_price"] < wallet_balance:
                             success, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
