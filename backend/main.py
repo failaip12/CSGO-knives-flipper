@@ -2,13 +2,11 @@ import datetime
 import time
 import re
 import json
-import logging
 import tempfile
 import shutil
 import os
 import random
 import string
-import sys
 
 import mysql.connector
 from bs4 import BeautifulSoup
@@ -23,6 +21,8 @@ from tqdm import tqdm
 from mysql.connector import Error
 
 from multiprocessing.dummy import Pool as ThreadPool
+
+from CustomLogger import CustomLogger
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
 # https://steamcommunity.com/market/search?q=&category_730_ItemSet%5B%5D=any&category_730_ProPlayer%5B%5D=any&category_730_StickerCapsule%5B%5D=any&category_730_TournamentTeam%5B%5D=any&category_730_Weapon%5B%5D=any&category_730_Type%5B%5D=tag_CSGO_Type_Knife&appid=730#p1_name_asc
@@ -195,7 +195,7 @@ def get_and_save_historical_pricing_helper(data, date_format, cursor, connection
     return price, parsed_date
 
 
-def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
+def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name, logger):
     max_attempts = 3
     current_attempt = 0
     console_log_result = None
@@ -220,12 +220,12 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
         time.sleep(current_attempt)
         #driver.implicitly_wait(current_attempt)  # Adjust the wait time as needed
     if console_log_result is None:
-        logging.error(f"Could not execute javascript {name}")
+        logger.error(f"Could not execute javascript {name}")
         return None, None
     console_log_result_json = json.loads(console_log_result)
     data = console_log_result_json['data'] #date, price, count
     if data is None:
-        logging.error(f"Could not parse json {name}")
+        logger.error(f"Could not parse json {name}")
         return None, None
     
     date_format = "%b %d %Y %H"
@@ -252,9 +252,9 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name):
     return price, parsed_date
 
 
-def get_knife_info(name, driver, cursor, connection, wait_time):
+def get_knife_info(name, driver, cursor, connection, wait_time, logger):
     url = f"https://steamcommunity.com/market/listings/730/{name}"
-    print(name)
+    logger.info(f"Processing knife {name}")
     # Extract knife data with retries
     data = extract_knife_data_with_retry(driver, url, wait_time)
     current_price = True
@@ -262,7 +262,7 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
 
     if(isinstance(data['message'], str)):
         if "made too many requests" in data['message']:
-            logging.critical(f"Too many requests {name}, stopping...")
+            logger.critical(f"Too many requests {name}, stopping...")
             exit(1)
             return None
         
@@ -270,7 +270,7 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
             current_price = False
     else:
         if data['message'] and data['message'][0].text: 
-            logging.error(f"Steam buggin {name}")
+            logger.error(f"Steam buggin {name}")
             time.sleep(10)
             return None
     
@@ -290,12 +290,12 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     buy_orders = True
     if len(data['buy_orders']) < 2:
         #print(data['buy_orders'])
-        logging.error(f"No buy orders {name}")
+        logger.error(f"No buy orders {name}")
         buy_orders = False
         #return None
     
     if len(data['current_min_price_with_fee']) < 1:
-        logging.info(f"No current price {name}")
+        logger.info(f"No current price {name}")
         current_price = False
         #return None
     
@@ -306,7 +306,7 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
         try:
             current_min_price_with_fee = float(text)
         except Exception as e:
-            logging.error(f"Could not parse current_min_price_with_fee {text} for knife {name}: {e}")
+            logger.error(f"Could not parse current_min_price_with_fee {text} for knife {name}: {e}")
         
         #text = data['current_min_price_without_fee'][0].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()
         #try:
@@ -350,9 +350,9 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     #    cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
     #    connection.commit()
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id,
-                                                                         name)
+                                                                         name, logger)
     if last_min_price_with_fee is None or last_sold is None:
-        logging.error(f"Could not process price history {name}")
+        logger.error(f"Could not process price history {name}")
     last_min_price_without_fee = None
     if(last_min_price_with_fee is not None):
         last_min_price_without_fee = last_min_price_with_fee / 1.15
@@ -374,13 +374,13 @@ def get_knife_info(name, driver, cursor, connection, wait_time):
     }
     return new_knife
 
-def safe_get_knife_info(name, driver, cursor, connection, wait_time):
+def safe_get_knife_info(name, driver, cursor, connection, wait_time, logger):
     """A wrapper that catches and logs errors for get_knife_info."""
     try:
-        knife_info = get_knife_info(name[0], driver, cursor, connection, wait_time)
+        knife_info = get_knife_info(name[0], driver, cursor, connection, wait_time, logger)
         return knife_info
     except Exception as e:
-        logging.error(f"Error processing knife {name[0]}: {e}")
+        logger.error(f"Error processing knife {name[0]}: {e}")
         return None  # Return None or handle as needed
 
 def save_knives_to_db(knives, cursor, connection):
@@ -441,11 +441,11 @@ def connect_to_db(host, database, port, user, password):
         if sql_connection.is_connected():
             sql_cursor = sql_connection.cursor()
         else:
-            print("Greška u konekciji")
+            logger.critical("SQL connection error, likely invalid connection parameters")
             exit(1)
 
     except Error as e:
-        print("Greška u konekciji ", e)
+        logger.critical("SQL connection error ", e)
         exit(1)
     return sql_connection, sql_cursor
 
@@ -497,7 +497,7 @@ def copy_user_data_dir(source_dir):
     try:
         shutil.copytree(source_dir, temp_dir, dirs_exist_ok=True)
     except Exception as e:
-        print(f"Error copying directory: {e}")
+        logger.error(f"Error copying directory: {e}")
         shutil.rmtree(temp_dir)  # Cleanup in case of failure
         raise e
 
@@ -524,14 +524,14 @@ def connect_to_db_threaded():
     # Create a new connection per thread
     return connect_to_db('localhost', 'knives', '3306', 'root', '')
 
-def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
+def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar, logger):
     batch_size = 15
     connection, cursor = connect_to_db_threaded()
     # Initialize the driver once per thread
     driver, user_data_dir = initialize_driver(True)
     batch = list()
     for knife_name in knife_names:
-        knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time)
+        knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time, logger)
         if knife_info:
             batch.append(knife_info)
             
@@ -543,7 +543,7 @@ def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar):
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
 
-
+#TODO: Ctrl C to properly close and clean up
 def update_all_knife_data(date = None, wait_time = 6):
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
 
@@ -568,7 +568,7 @@ def update_all_knife_data(date = None, wait_time = 6):
     # Function to update progress bar as each chunk finishes
     with ThreadPool(thread_count) as pool:
         # Use imap_unordered to process the chunks and update progress for each chunk
-        for _ in pool.imap_unordered(lambda chunk: fetch_all_knives_for_thread(chunk, wait_time, progress_bar), knife_name_chunks):
+        for _ in pool.imap_unordered(lambda chunk: fetch_all_knives_for_thread(chunk, wait_time, progress_bar, logger), knife_name_chunks):
             pass
 
     progress_bar.close()  # Close the progress bar after completion
@@ -584,21 +584,9 @@ def update_all_knife_data(date = None, wait_time = 6):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.ERROR,  # Set the logging level
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler("knives.log", encoding='utf-8'),  # Set UTF-8 encoding for the file
-            logging.StreamHandler(sys.stdout)  # Log to the console
-        ]
-    )
+    logger = CustomLogger(log_file="knives.log", log_level="[INFO]")
 
     # Update the StreamHandler to explicitly use UTF-8 encoding
-    for handler in logging.getLogger().handlers:
-        if isinstance(handler, logging.StreamHandler):
-            handler.encoding = 'utf-8'
-    #logging.getLogger("selenium").setLevel(logging.ERROR)
-    #logging.getLogger("urllib3").setLevel(logging.WARNING)
     update_all_knife_data()
     #connection, cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
     #knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"

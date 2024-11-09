@@ -1,7 +1,6 @@
 import os
 import csv
 import shutil
-from requests import ConnectionError
 from decimal import Decimal, ROUND_CEILING
 import time
 from dotenv import load_dotenv
@@ -10,7 +9,7 @@ from steampy.client import SteamClient
 from steampy.models import GameOptions, Currency
 
 from main import safe_get_knife_info, save_knives_to_db, connect_to_db, initialize_driver
-
+from CustomLogger import CustomLogger
 def round_up_decimal(number):
     return float(Decimal(str(number)).quantize(Decimal('0.01'), rounding=ROUND_CEILING))
 
@@ -128,10 +127,10 @@ def compare_orders(actual, file, file_path):
                 value1 = int(item1[key]) if key == 'quantity' else item1[key]
                 value2 = int(item2[key]) if key == 'quantity' else item2[key]
                 if value1 != value2:
-                    print(f"Difference found in order {name}")
-                    print(f"  Column '{key}': '{item1[key]}' (actual) vs '{item2[key]}' (file)")
+                    logger.info(f"Difference found in order {name}")
+                    logger.info(f"  Column '{key}': '{item1[key]}' (actual) vs '{item2[key]}' (file)")
         else:
-            print(f"Order {name} in actual is missing from file. We will add it to the file")
+            logger.info(f"Order {name} in actual is missing from file. We will add it to the file")
             missing.append(item1)
     add_knives_to_csv(missing, file_path)
 
@@ -141,7 +140,7 @@ def check_for_missing_orders(actual, file, file_path):
     missing_in_actual = file_orders - actual_orders
     for element in missing_in_actual:
         #logging.info(f"Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
-        print(f"INFO: Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
+        logger.info(f"INFO: Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
     delete_knives_from_csv(missing_in_actual, file_path)
 
 def handle_user_choice():
@@ -166,13 +165,13 @@ def cancel_order(order):
     try:
         response = steam_client.market.cancel_buy_order(int(order.get('order_id')))
     except Exception as e:
-        print(e)
-        print(f"ERROR: Failed to cancel the buy order on the knife {order.get('item_name')} skipping...")
+        logger.error(f"Failed to cancel the buy order on the knife {order.get('item_name')} skipping...")
+        logger.error(e)
         return False
     if response.get('success') != 1:
         return False
     else:
-        print(f"INFO: Successfully canceled the buy order on the knife {order.get('item_name')} at price {order.get('price')}")
+        logger.info(f"Successfully canceled the buy order on the knife {order.get('item_name')} at price {order.get('price')}")
         return True
 
 def put_order(listing, price):
@@ -180,13 +179,13 @@ def put_order(listing, price):
         response = steam_client.market.create_buy_order(listing.get('knife_name'), price, 1, GameOptions.CS, Currency.EURO)
         
     except Exception as e:
-        print(e)
-        print("ERROR: Failed to put the buy order on the knife " + listing.get('knife_name') + ", skipping...")
+        logger.error("Failed to put the buy order on the knife " + listing.get('knife_name') + ", skipping...")
+        logger.error(e)
         return False, -1
     if response.get('success') != 1:
         return False, -1
     else:
-        print(f"INFO: Successfully put the buy order on the knife {listing.get('knife_name')} at price {price / 100.0}")
+        logger.info(f"Successfully put the buy order on the knife {listing.get('knife_name')} at price {price / 100.0}")
         return True, int(response.get('buy_orderid'))
 
 def cancel_orders(orders):
@@ -217,20 +216,14 @@ def get_wallet_balance(steam_client):
             wallet_balance = float(wallet_balance)
             return True, wallet_balance
         except Exception:
-            print("ERROR: Failed to get wallet balance sleeping for 30 seconds then trying again")
+            logger.error("Failed to get wallet balance sleeping for 30 seconds then trying again")
             time.sleep(30)
             return False, -1
 
 if __name__ == "__main__":
     load_dotenv()
-    #logging.basicConfig(
-    #    level=logging.INFO,  # Set the logging level
-    #    format="%(asctime)s [%(levelname)s] %(message)s",
-    #    handlers=[
-    #        logging.FileHandler("order_maxer.log", encoding='utf-8'),  # Set UTF-8 encoding for the file
-    #        logging.StreamHandler(sys.stdout)  # Log to the console
-    #    ]
-    #)
+    logger = CustomLogger(log_file="order_maxer.log", log_level="[INFO]")
+
     connection, cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
     driver, user_data_dir = initialize_driver(True)
     login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
@@ -248,10 +241,10 @@ if __name__ == "__main__":
     if os.path.exists(file_path):
         knife_orders_file = load_orders_from_csv(file_path)
         #logging.info("Loaded last known orders and your max prices from file")
-        print("INFO: Loaded last known orders and your max prices from file")
+        logger.info("Loaded last known orders and your max prices from file")
     else:
         #logging.info("CSV file doesn't exist")
-        print("INFO: CSV file doesn't exist")
+        logger.info("CSV file doesn't exist, creating a new one")
     if knife_orders_file is not None:
         check_for_missing_orders(knife_orders_actual, knife_orders_file, file_path)
         knife_orders_file = load_orders_from_csv(file_path) #XDDDDDDDDDDDDDDDDDDD
@@ -281,7 +274,7 @@ if __name__ == "__main__":
     save_orders_to_csv(knife_orders_file, file_path)
     
     for order in knife_orders_file:
-        print(f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
+        logger.info(f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
     
     while True:
         try:
@@ -293,13 +286,13 @@ if __name__ == "__main__":
 
             for knife_order in knife_orders_file:
                 knife_name = knife_order['item_name']
-                knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6)
+                knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
                 if knife_listing is None:
                     continue
                 save_knives_to_db([knife_listing], cursor, connection)
                 current_buy_order_price = float(knife_order['price'])
                 if(knife_listing["buy_order_price"] is None):
-                    print(f"Buy order price is None {knife_name}")
+                    logger.error(f"Buy order price is None {knife_name}")
                     continue
                 price_difference = knife_listing["buy_order_price"] - current_buy_order_price
                 if (price_difference > 0) and (knife_listing["buy_order_price"] < float(knife_order["max_price"])):
@@ -322,14 +315,14 @@ if __name__ == "__main__":
                                 add_knives_to_csv([new_order], file_path)
                 elif(current_buy_order_price >= float(knife_order["max_price"])):
                     if(knife_order.get('action') == 'cancel' and cancel_order(knife_order)):
-                        print(f"Canceled order on knife {knife_name} because price is bigger than maximum set.")
+                        logger.info(f"Canceled order on knife {knife_name} because price is bigger than maximum set.")
                     
                             
             knife_orders_file = load_orders_from_csv(file_path)
             sleep_seconds = 300
-            print(f"INFO: Sleeping for {sleep_seconds} seconds")
+            logger.info(f"Sleeping for {sleep_seconds} seconds")
             time.sleep(sleep_seconds)
         except KeyboardInterrupt:
-            print("\nINFO: Canceling loop and shutting down...")
+            logger.info("\n Canceling loop and shutting down...")
             break
     shutil.rmtree(user_data_dir)
