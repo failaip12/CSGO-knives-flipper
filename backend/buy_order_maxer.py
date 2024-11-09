@@ -298,6 +298,9 @@ if __name__ == "__main__":
                     continue
                 save_knives_to_db([knife_listing], cursor, connection)
                 current_buy_order_price = float(knife_order['price'])
+                if(knife_listing["buy_order_price"] is None):
+                    print(f"Buy order price is None {knife_name}")
+                    continue
                 price_difference = knife_listing["buy_order_price"] - current_buy_order_price
                 if (price_difference > 0) and (current_buy_order_price < float(knife_order["max_price"])):
                     if(cancel_order(knife_order)):
