@@ -1,3 +1,4 @@
+from decimal import Decimal
 import time
 import re
 import json
@@ -30,7 +31,7 @@ from multiprocessing.dummy import Pool as ThreadPool
 
 from CustomLogger import CustomLogger
 from Knife import Knife
-ExtractedData = Dict[str, Union[str, List[str]]]
+ExtractedData = Dict[str, List[Any]]
 
 
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
@@ -190,17 +191,24 @@ def get_and_save_historical_pricing_helper(data: List[List], date_format: str, c
         price = result[1]
         sold_count = result[2]
         #TODO:           sell_time_id
-        cursor.execute("SELECT * FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
+        cursor.execute("SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
         existing_date = cursor.fetchone()
         if not existing_date:
             cursor.execute("INSERT INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,))
             connection.commit()
             date_id = cursor.lastrowid
         else:
-            date_id = existing_date[0]
+            value = existing_date[0]
+            if isinstance(value, (int, float, Decimal)):
+                date_id = int(value)
+            elif isinstance(value, str) and value.isdigit():
+                date_id = int(value)
+            else:
+                date_id = None
         #TODO: IGNORE should in theory be unnecessary
-        cursor.execute("INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)", (knife_id, date_id, price, sold_count))
-        connection.commit()
+        if(date_id is not None):
+            cursor.execute("INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)", (knife_id, date_id, price, sold_count))
+            connection.commit()
     return price, parsed_date
 
 
@@ -211,14 +219,20 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
     price = None
     parsed_date = None
     while current_attempt < max_attempts:
-        console_log_result = driver.execute_script(
-            """
-            var result = {
-                data: g_plotPriceHistory && g_plotPriceHistory.data && g_plotPriceHistory.data[0],
-            };
-            return JSON.stringify(result);
-            """
-        )
+        try:
+            console_log_result = driver.execute_script(
+                """
+                var result = {
+                    data: g_plotPriceHistory && g_plotPriceHistory.data && g_plotPriceHistory.data[0],
+                };
+                return JSON.stringify(result);
+                """
+            )
+        except Exception as e:
+            logger.error("Could not get historical pricing {name}" + str(e))
+            current_attempt += 1
+            time.sleep(current_attempt)
+            continue
 
         # If data is not null, break out of the loop
         if console_log_result is not None:
@@ -255,7 +269,8 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
                                                                         knife_id)
         else:
             parsed_date = parsed_knife_last_date
-            price = float(knife.last_min_price_with_fee)
+            if(knife.last_min_price_with_fee is not None):
+                price = float(knife.last_min_price_with_fee)
     else:
         price, parsed_date = get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id)
     return price, parsed_date
@@ -266,11 +281,14 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
     logger.info(f"Processing knife {name}")
     # Extract knife data with retries
     data = extract_knife_data_with_retry(driver, url, wait_time)
+    if(data is None):
+        return None
     current_price = True
     # Handle cases where there is an error message
 
     if(isinstance(data['message'], str)):
         if "made too many requests" in data['message']:
+            #TODO: The detection is somehow wrong idk... steam bans us but we can continue anyways
             logger.critical(f"Too many requests {name}, stopping...")
             exit(1)
             return None
@@ -326,7 +344,7 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
             javascript_code = script_tag.get_attribute('text')
             
             # Check for the specific pattern in the JavaScript code
-            if 'Market_LoadOrderSpread' in javascript_code:
+            if javascript_code and 'Market_LoadOrderSpread' in javascript_code:
                 desired_line = javascript_code.strip()
                 break
 
@@ -346,6 +364,9 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
     #    print("++++++++++++++")
     #    cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
     #    connection.commit()
+    if knife_id is None:
+        return None
+    knife_id = int(knife_id)
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(driver, cursor, connection, knife_id,
                                                                          name, logger)
     if last_min_price_with_fee is None or last_sold is None:
@@ -456,7 +477,7 @@ def connect_to_db(host: str, database: str, port: int, user: str, password: str)
             exit(1)
 
     except Error as e:
-        logger.critical("SQL connection error ", e)
+        logger.critical("SQL connection error " + str(e))
         exit(1)
     return sql_connection, sql_cursor
 
