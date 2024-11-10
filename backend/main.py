@@ -1,4 +1,3 @@
-import datetime
 import time
 import re
 import json
@@ -7,27 +6,38 @@ import shutil
 import os
 import random
 import string
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import mysql.connector
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, ResultSet, Tag
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import StaleElementReferenceException
+from selenium.webdriver.chrome.webdriver import WebDriver
+from datetime import datetime
+
 from bisect import bisect_left
 from tqdm import tqdm
+
 from mysql.connector import Error
+from mysql.connector.connection import MySQLConnection
+from mysql.connector.cursor import MySQLCursor
 
 from multiprocessing.dummy import Pool as ThreadPool
 
 from CustomLogger import CustomLogger
+from Knife import Knife
+ExtractedData = Dict[str, Union[str, List[str]]]
+
+
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
 # https://steamcommunity.com/market/search?q=&category_730_ItemSet%5B%5D=any&category_730_ProPlayer%5B%5D=any&category_730_StickerCapsule%5B%5D=any&category_730_TournamentTeam%5B%5D=any&category_730_Weapon%5B%5D=any&category_730_Type%5B%5D=tag_CSGO_Type_Knife&appid=730#p1_name_asc
 
-def parse_page(url, driver):
+def parse_page(url: str, driver: WebDriver) -> str:
     driver.get(url)
     #driver.implicitly_wait(sleep_time)
     #time.sleep(sleep_time)
@@ -35,7 +45,7 @@ def parse_page(url, driver):
     return page
 
 
-def interceptor(request):
+def interceptor(request) -> None:
     """
     request.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
     request.headers['Accept-Encoding'] = 'gzip, deflate, br'
@@ -52,7 +62,7 @@ def interceptor(request):
     request.headers['Access-Control-Allow-Origin'] = '*'
 
 #TODO: Multithread this b
-def get_knife_list(driver, wait_time):
+def get_knife_list(driver: WebDriver, wait_time: int) -> Set[str]:
     range_start = 0
     base_url = "https://steamcommunity.com/market/search?q=&category_730_ItemSet[]=any&category_730_ProPlayer[]=any&category_730_StickerCapsule[]=any&category_730_TournamentTeam[]=any&category_730_Weapon[]=any&category_730_Type[]=tag_CSGO_Type_Knife&appid=730#p{}_name_asc"
     knife_name_set = set()
@@ -63,7 +73,7 @@ def get_knife_list(driver, wait_time):
     soup = BeautifulSoup(page, "html.parser")
     number_of_pages = 250
     names = soup.find_all('span', class_='market_listing_item_name')
-    new_names = []
+    new_names: List[str] = list()
     for name in names:
         knife_name_set.add(name.text.strip())
     for page_num in tqdm(range(range_start + 2, number_of_pages + 1)):
@@ -92,15 +102,14 @@ def get_knife_list(driver, wait_time):
     return knife_name_set
 
 
-def add_new_knives_to_db(names, cursor, connection):
+def add_new_knives_to_db(names: List[str], cursor: MySQLCursor, connection: MySQLConnection) -> None:
     for name in tqdm(names):
         cursor.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
         if cursor.fetchone() is None:
             cursor.execute("INSERT INTO knives (knife_name) VALUES (%s)", (name,))
             connection.commit()
 
-
-def extract_knife_data(driver, url, wait_time):
+def extract_knife_data(driver: WebDriver, url: str, wait_time: int) -> ExtractedData:
     driver.execute_script("location.reload(true);")
     page = parse_page(url, driver)
 
@@ -153,7 +162,7 @@ def extract_knife_data(driver, url, wait_time):
     return data
 
 
-def extract_knife_data_with_retry(driver, url, wait_time):
+def extract_knife_data_with_retry(driver: WebDriver, url: str, wait_time: int) -> Optional[ExtractedData]:
     # Function to extract knife data with retries
     retries = 3
     data = None
@@ -171,13 +180,13 @@ def extract_knife_data_with_retry(driver, url, wait_time):
     return data
 
 #TODO: Optimize this b
-def get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id):
+def get_and_save_historical_pricing_helper(data: List[List], date_format: str, cursor: MySQLCursor, connection: MySQLConnection, knife_id: int) -> Tuple[Optional[float], Optional[datetime]]:
     price = None
     parsed_date = None
     #TODO: Batch insert
     for result in data:
         date_string = result[0][:-4]
-        parsed_date = datetime.datetime.strptime(date_string, date_format)
+        parsed_date = datetime.strptime(date_string, date_format)
         price = result[1]
         sold_count = result[2]
         #TODO:           sell_time_id
@@ -195,7 +204,7 @@ def get_and_save_historical_pricing_helper(data, date_format, cursor, connection
     return price, parsed_date
 
 
-def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name, logger):
+def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, knife_id: int, name: str, logger: CustomLogger) -> Tuple[Optional[float], Optional[datetime]]:
     max_attempts = 3
     current_attempt = 0
     console_log_result = None
@@ -230,12 +239,12 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name, 
     
     date_format = "%b %d %Y %H"
     knife = get_knife_from_db(cursor, name)
-    if knife and knife[9]: #Check if it exists and has a date
-        knife_date = knife[9]
+    if knife and knife.last_sold: #Check if it exists and has a date
+        knife_date = knife.last_sold
         knife_last_date = data[len(data) - 1][0][:-4]
-        parsed_knife_last_date = datetime.datetime.strptime(knife_last_date, date_format)
+        parsed_knife_last_date = datetime.strptime(knife_last_date, date_format)
 
-        dates = [datetime.datetime.strptime(entry[0][:-4], date_format) for entry in data]
+        dates = [datetime.strptime(entry[0][:-4], date_format) for entry in data]
 
         index = bisect_left(dates, knife_date)
 
@@ -246,13 +255,13 @@ def get_and_save_historical_pricing(driver, cursor, connection, knife_id, name, 
                                                                         knife_id)
         else:
             parsed_date = parsed_knife_last_date
-            price = float(knife[4])
+            price = float(knife.last_min_price_with_fee)
     else:
         price, parsed_date = get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id)
     return price, parsed_date
 
 
-def get_knife_info(name, driver, cursor, connection, wait_time, logger):
+def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     url = f"https://steamcommunity.com/market/listings/730/{name}"
     logger.info(f"Processing knife {name}")
     # Extract knife data with retries
@@ -273,18 +282,6 @@ def get_knife_info(name, driver, cursor, connection, wait_time, logger):
             logger.error(f"Steam buggin {name}")
             time.sleep(10)
             return None
-    
-    new_knife = {
-        'knife_name': name,
-        'knife_id': None,
-        'current_min_price_with_fee': None,
-        'current_min_price_without_fee': None,
-        'last_min_price_with_fee': None,
-        'last_min_price_without_fee': None,
-        'buy_order_price': None,
-        'last_updated': datetime.datetime.now(),
-        'last_sold': None
-    }
 
     # Handle cases where required data is not available
     buy_orders = True
@@ -361,20 +358,19 @@ def get_knife_info(name, driver, cursor, connection, wait_time, logger):
     if(current_min_price_with_fee is not None):
         current_min_price_without_fee = current_min_price_with_fee / 1.15
     
-    new_knife = {
-        'knife_name': name,
-        'knife_id': knife_id,
-        'current_min_price_with_fee': current_min_price_with_fee,
-        'current_min_price_without_fee': current_min_price_without_fee,
-        'last_min_price_with_fee': last_min_price_with_fee,
-        'last_min_price_without_fee': last_min_price_without_fee,
-        'buy_order_price': buy_order_price,
-        'last_updated': datetime.datetime.now(),
-        'last_sold': last_sold
-    }
-    return new_knife
+    knife = Knife(
+        name,
+        knife_id,
+        current_min_price_with_fee,
+        current_min_price_without_fee,
+        last_min_price_with_fee,
+        last_min_price_without_fee,
+        buy_order_price,
+        last_sold
+    )
+    return knife
 
-def safe_get_knife_info(name, driver, cursor, connection, wait_time, logger):
+def safe_get_knife_info(name: Tuple[str], driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     """A wrapper that catches and logs errors for get_knife_info."""
     try:
         knife_info = get_knife_info(name[0], driver, cursor, connection, wait_time, logger)
@@ -383,7 +379,7 @@ def safe_get_knife_info(name, driver, cursor, connection, wait_time, logger):
         logger.error(f"Error processing knife {name[0]}: {e}")
         return None  # Return None or handle as needed
 
-def save_knives_to_db(knives, cursor, connection):
+def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQLConnection) -> None:
     if not knives:
         return
     
@@ -405,14 +401,14 @@ def save_knives_to_db(knives, cursor, connection):
     for knife in knives:
         # Populate the fields and handle optional fields with None
         values.append((
-            knife.get('current_min_price_with_fee'),
-            knife.get('current_min_price_without_fee'),
-            knife.get('last_min_price_with_fee'),
-            knife.get('last_min_price_without_fee'),
-            knife.get('buy_order_price'),
-            knife.get('last_updated'),
-            knife.get('last_sold'),
-            knife['knife_name']  # WHERE clause value
+            knife.current_min_price_with_fee,
+            knife.current_min_price_without_fee,
+            knife.last_min_price_with_fee,
+            knife.last_min_price_without_fee,
+            knife.buy_order_price,
+            knife.last_updated,
+            knife.last_sold,
+            knife.knife_name  # WHERE clause value
         ))
     
     # Execute the batch update
@@ -421,7 +417,7 @@ def save_knives_to_db(knives, cursor, connection):
 
 
 
-def get_knife_list_from_db(cursor, date = None):
+def get_knife_list_from_db(cursor: MySQLCursor, date: Optional[str] = None) -> List[Tuple[str]]:
     if(date is None):
         select_query = "SELECT knife_name FROM knives"
     else:
@@ -430,12 +426,27 @@ def get_knife_list_from_db(cursor, date = None):
     knife_list = cursor.fetchall()
     return knife_list
 
-def get_knife_from_db(cursor, name):
+def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
     cursor.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
-    return cursor.fetchone()
+    row = cursor.fetchone()  # Fetch a single row
+    if row:
+        # Create a Knife object from the fetched data
+        knife = Knife(
+            knife_id=row[0],
+            knife_name=row[1],
+            current_min_price_with_fee=row[2],
+            current_min_price_without_fee=row[3],
+            last_min_price_with_fee=row[4],
+            last_min_price_without_fee=row[5],
+            buy_order_price=row[6],
+            last_sold=row[9] if len(row) > 9 else None  # Last sold is optional
+        )
+        return knife
+    else:
+        return None  # If no knife is found, return None
 
 
-def connect_to_db(host, database, port, user, password):
+def connect_to_db(host: str, database: str, port: int, user: str, password: str) -> Tuple[MySQLConnection, MySQLCursor]:
     try:
         sql_connection = mysql.connector.connect(host=host, database=database, port=port, user=user, password=password)
         if sql_connection.is_connected():
@@ -450,7 +461,7 @@ def connect_to_db(host, database, port, user, password):
     return sql_connection, sql_cursor
 
 
-def update_amount_sold(cursor):
+def update_amount_sold(cursor: MySQLCursor) -> None:
     update_query = '''
     UPDATE `knives`.`Knives` k
     JOIN (
@@ -463,7 +474,7 @@ def update_amount_sold(cursor):
     cursor.execute(update_query)
 
 
-def update_selling_frequency(cursor):
+def update_selling_frequency(cursor: MySQLCursor) -> None:
     update_query = '''
     UPDATE `knives`.`Knives` k
     JOIN (
@@ -477,7 +488,7 @@ def update_selling_frequency(cursor):
     '''
     cursor.execute(update_query)
 
-def copy_user_data_dir(source_dir):
+def copy_user_data_dir(source_dir: str) -> str:
     """
     Copy the user data directory to a unique directory for each thread.
     Ensures that the directory name is unique to avoid conflicts.
@@ -503,7 +514,7 @@ def copy_user_data_dir(source_dir):
 
     return temp_dir
 
-def initialize_driver(headless):
+def initialize_driver(headless: bool) -> Tuple[WebDriver, str]:
     # Specify the original user data directory that you want to copy from
     original_user_data_dir = "C:/Filip_projekti/steam amrket boi/chrome-cache"  #TODO: Use pathlib and relative paths
 
@@ -520,11 +531,11 @@ def initialize_driver(headless):
     chrome_driver.request_interceptor = interceptor  # Attach interceptor here
     return chrome_driver, user_data_dir
 
-def connect_to_db_threaded():
+def connect_to_db_threaded() -> Tuple[MySQLConnection, MySQLCursor]:
     # Create a new connection per thread
-    return connect_to_db('localhost', 'knives', '3306', 'root', '')
+    return connect_to_db('localhost', 'knives', 3306, 'root', '')
 
-def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar, logger):
+def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger) -> None:
     batch_size = 15
     connection, cursor = connect_to_db_threaded()
     # Initialize the driver once per thread
@@ -544,8 +555,8 @@ def fetch_all_knives_for_thread(knife_names, wait_time, progress_bar, logger):
     shutil.rmtree(user_data_dir)
 
 #TODO: Ctrl C to properly close and clean up
-def update_all_knife_data(date = None, wait_time = 6):
-    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
+def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> None:
+    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
 
     knife_names = get_knife_list_from_db(sql_cursor, date)
     #get_knife_info("★ Bayonet", chrome_driver, sql_cursor, sql_connection)
@@ -588,10 +599,10 @@ if __name__ == "__main__":
 
     # Update the StreamHandler to explicitly use UTF-8 encoding
     update_all_knife_data()
-    #connection, cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
+    #connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
     #knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
     #driver, user_data_dir = initialize_driver(False)
-    #knife_info = safe_get_knife_info([knife_name], driver, cursor, connection, 6)
+    #knife_info = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
     #driver.quit()
     #shutil.rmtree(user_data_dir)
     #update_all_knife_data("'2024-11-03'")

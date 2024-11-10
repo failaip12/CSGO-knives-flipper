@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Dict
 
 class CustomLogger:
-    LOG_LEVELS = {
+    LOG_LEVELS: Dict[str, int] = {
         "[DEBUG]": 10,
         "[INFO]": 20,
         "[WARNING]": 30,
@@ -9,17 +10,17 @@ class CustomLogger:
         "[CRITICAL]": 50
     }
 
-    def __init__(self, log_file="app.log", log_level="[INFO]"):
+    def __init__(self, log_file: str="app.log", log_level: str="[INFO]") -> None:
         self.log_file = log_file
         self.log_level = log_level
         self._setup_log_file()
 
-    def _setup_log_file(self):
+    def _setup_log_file(self) -> None:
         # Ensure log file is created with UTF-8 encoding
         with open(self.log_file, 'w', encoding='utf-8') as file:
             file.write("")
 
-    def _log(self, level, message):
+    def _log(self, level: str, message: str) -> None:
         # Check if the message level is high enough to log
         if CustomLogger.LOG_LEVELS[level] < CustomLogger.LOG_LEVELS[self.log_level]:
             return
@@ -34,24 +35,24 @@ class CustomLogger:
         with open(self.log_file, 'a', encoding='utf-8') as file:
             file.write(formatted_message)
 
-    def set_log_level(self, level):
+    def set_log_level(self, level: str) -> None:
         if level in CustomLogger.LOG_LEVELS:
             self.log_level = level
         else:
             raise ValueError(f"Invalid log level: {level}")
 
 
-    def debug(self, message):
+    def debug(self, message: str) -> None:
         self._log("[DEBUG]", message)
     
-    def info(self, message):
+    def info(self, message: str) -> None:
         self._log("[INFO]", message)
 
-    def warning(self, message):
+    def warning(self, message: str) -> None:
         self._log("[WARNING]", message)
 
-    def error(self, message):
+    def error(self, message: str) -> None:
         self._log("[ERROR]", message)
     
-    def critical(self, message):
+    def critical(self, message: str) -> None:
         self._log("[CRITICAL]", message)

@@ -228,6 +228,7 @@ if __name__ == "__main__":
     driver, user_data_dir = initialize_driver(True)
     login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
     steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'], login_cookies=login_cookies)
+    #steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'])
     assert steam_client.was_login_executed
     success, wallet_balance = get_wallet_balance(steam_client)
     while(not success):
@@ -282,7 +283,8 @@ if __name__ == "__main__":
             if(not success):
                 continue
             #TODO: The code below assumes that the wallet balance doesnt change and that no buy orders go through, 
-            # and it doesnt check the consistency between csv file and the actual buy orders
+            # and it doesnt check the consistency between csv file and the actual buy orders 
+            # so if you change the buy orders manually through steam it gets fuckd
 
             for knife_order in knife_orders_file:
                 knife_name = knife_order['item_name']
