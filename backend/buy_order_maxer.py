@@ -341,6 +341,7 @@ if __name__ == "__main__":
                     logger.error(f"{knife_name} order has no max price, skipping...")
                     continue
                 knife_max_price = float(knife_max_price)
+                #TODO: Handle case where me and other people have the same max buy order. Example: 283-4 people, 283.1-3 people 283.1 is max
                 if (price_difference > 0) and (knife_listing.buy_order_price < knife_max_price):
                     if(cancel_order(knife_order)):
                         if knife_listing.buy_order_price < wallet_balance:
