@@ -3,29 +3,42 @@ import csv
 import shutil
 from decimal import Decimal, ROUND_CEILING
 import time
+from typing import Dict, List, Set, Tuple
 from dotenv import load_dotenv
 
 from steampy.client import SteamClient
 from steampy.models import GameOptions, Currency
 
+from Knife import Knife
 from main import safe_get_knife_info, save_knives_to_db, connect_to_db, initialize_driver
 from CustomLogger import CustomLogger
-def round_up_decimal(number):
+from selenium.webdriver.chrome.webdriver import WebDriver
+from mysql.connector.connection import MySQLConnection
+
+def exit_gracefully(driver: WebDriver, connection: MySQLConnection, user_data_dir: str, exit_code: int) -> None:
+    driver.quit()
+    connection.close()
+    shutil.rmtree(user_data_dir)
+    exit(exit_code)
+
+def round_up_decimal(number: float | str) -> float:
     return float(Decimal(str(number)).quantize(Decimal('0.01'), rounding=ROUND_CEILING))
 
-def get_price_from_user(actual_listing):
+def get_price_from_user(actual_listing: Dict) -> float:
     while True:
         try:
             max_price = round_up_decimal(input(f"Set the maximum buy order at max for this item: {actual_listing.get('item_name')}, your current buy order price: {actual_listing.get('price')}\n"))
-
-            if(max_price > float(actual_listing.get('price'))):
+            if(actual_listing.get('price') is None):
+                logger.critical(f"Unexpectedly the {actual_listing.get('item_name')} doesnt have your buy order, exiting...")
+                exit_gracefully(driver, connection, user_data_dir, 1)
+            if(max_price > float(actual_listing.get('price', 0.0))):
                 return max_price
             else:
                 print(f"Please provide a bigger price than {actual_listing.get('price')}")
         except ValueError:
             print("Invalid input. Please enter a valid number.")
 
-def get_action_from_user():
+def get_action_from_user() -> str:
     print("Set the action if the buy order price goes above max. I or i to ignore, C or c to cancel the buy order.")
     
     user_input = input().strip().lower()
@@ -40,7 +53,7 @@ def get_action_from_user():
         print("Invalid input, please press C or c, or I or i.")
         return get_action_from_user()
 
-def set_all_prices(listings):
+def set_all_prices(listings: List[Dict]) -> List[Dict]:
     knife_orders = list()
     for listing in listings:
         new_listing = listing
@@ -49,22 +62,27 @@ def set_all_prices(listings):
         knife_orders.append(new_listing)
     return knife_orders
 
-def filter_listings_to_knives(listings):
-    knife_orders = list()
-    for listing in listings['buy_orders']:
-        actual_listing = listings['buy_orders'][listing]
-        game_name = actual_listing['game_name']
-        item_name = actual_listing['item_name'].lower()
+def filter_listings_to_knives(listings: Dict) -> List[Dict]:
+    knife_orders: List[Dict] = list()
+    orders = listings.get('buy_orders')
+    if(orders is None):
+        logger.critical("Unexpectedly there are no buy orders, exiting...")
+        exit_gracefully(driver, connection, user_data_dir, 1)
+        return knife_orders
+    for order_id in orders:
+        actual_listing = orders.get(order_id)
+        game_name = actual_listing.get('game_name')
+        item_name = actual_listing.get('item_name').lower()
 
         if game_name == "Counter-Strike 2" and any(keyword in item_name for keyword in ["knife", "bayonet", "karambit", "shadow daggers"]):
             filtered_order = dict()
-            filtered_order['price'] = actual_listing['price'].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()
-            filtered_order['order_id'] = actual_listing['order_id']
-            filtered_order['item_name'] = actual_listing['item_name']
+            filtered_order['price'] = actual_listing.get('price').replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()
+            filtered_order['order_id'] = actual_listing.get('order_id')
+            filtered_order['item_name'] = actual_listing.get('item_name')
             knife_orders.append(filtered_order)
     return knife_orders
 
-def add_knives_to_csv(knives_to_add, file_path):
+def add_knives_to_csv(knives_to_add: List[Dict], file_path: str) -> None:
     if(len(knives_to_add) < 1):
         return
     for knife in knives_to_add:
@@ -85,13 +103,17 @@ def add_knives_to_csv(knives_to_add, file_path):
 
     #print(f"{len(knives_to_add)} knives added successfully.")
 
-def delete_knives_from_csv(knives_to_delete, file_path):
+def delete_knives_from_csv(knives_to_delete: List[str] | Set[str], file_path: str) -> None:
     if(len(knives_to_delete) < 1):
         return
     column_to_check = "item_name"
 
     with open(file_path, 'r', encoding='utf-8') as file:
         reader = csv.DictReader(file)
+        if not reader.fieldnames:
+            logger.critical("Unexpectedly csv file has no headers while deleting, exiting...")
+            exit_gracefully(driver, connection, user_data_dir, 1)
+            return
         rows = [row for row in reader if row[column_to_check] not in knives_to_delete]
 
     with open(file_path, 'w', newline='', encoding='utf-8') as file:
@@ -99,13 +121,13 @@ def delete_knives_from_csv(knives_to_delete, file_path):
         writer.writeheader()
         writer.writerows(rows)
 
-def save_orders_to_csv(knife_orders, file_path):
+def save_orders_to_csv(knife_orders: List[Dict], file_path: str) -> None:
     with open(file_path, 'w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=knife_orders[0].keys())
         writer.writeheader()
         writer.writerows(knife_orders)
 
-def load_orders_from_csv(file_path):
+def load_orders_from_csv(file_path: str) -> List[Dict]:
     data = []
     with open(file_path, 'r', encoding='utf-8') as file:
         reader = csv.DictReader(file)
@@ -115,7 +137,7 @@ def load_orders_from_csv(file_path):
 #TODO: Handle the differences properly
 #Difference found in order ★ StatTrak™ Bowie Knife | Autotronic (Minimal Wear)
 #  Column 'price': '224.60' (actual) vs '224.6' (file
-def compare_orders(actual, file, file_path):
+def compare_orders(actual: List[Dict], file: List[Dict], file_path: str) -> None:
     dict2 = {item['item_name']: item for item in file}
     missing = list()
     for item1 in actual:
@@ -134,7 +156,7 @@ def compare_orders(actual, file, file_path):
             missing.append(item1)
     add_knives_to_csv(missing, file_path)
 
-def check_for_missing_orders(actual, file, file_path):
+def check_for_missing_orders(actual: List[Dict], file: List[Dict], file_path: str) -> None:
     actual_orders = {item['item_name'] for item in actual}
     file_orders = {item['item_name'] for item in file}
     missing_in_actual = file_orders - actual_orders
@@ -143,7 +165,7 @@ def check_for_missing_orders(actual, file, file_path):
         logger.info(f"INFO: Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
     delete_knives_from_csv(missing_in_actual, file_path)
 
-def handle_user_choice():
+def handle_user_choice() -> str:
     print("If you want to cancel the order press C or c, if you want to put a new max price press N or n, if you want to ignore this press I or i")
     
     user_input = input().strip().lower()
@@ -161,12 +183,16 @@ def handle_user_choice():
         print("Invalid input, please press C, N, or I.")
         return handle_user_choice()
 
-def cancel_order(order):
+def cancel_order(order: Dict) -> bool:
     try:
-        response = steam_client.market.cancel_buy_order(int(order.get('order_id')))
+        order_id = order.get('order_id')
+        if(order_id is None):
+            logger.error(f"Failed to cancel the buy order on the knife {order.get('item_name')} because order has no id")
+            return False
+        response = steam_client.market.cancel_buy_order(int(order_id))
     except Exception as e:
         logger.error(f"Failed to cancel the buy order on the knife {order.get('item_name')} skipping...")
-        logger.error(e)
+        logger.error(str(e))
         return False
     if response.get('success') != 1:
         return False
@@ -174,18 +200,18 @@ def cancel_order(order):
         logger.info(f"Successfully canceled the buy order on the knife {order.get('item_name')} at price {order.get('price')}")
         return True
 
-def put_order(listing, price):
+def put_order(listing: Knife, price: int) -> Tuple[bool, int]:
     try:
-        response = steam_client.market.create_buy_order(listing.get('knife_name'), price, 1, GameOptions.CS, Currency.EURO)
+        response = steam_client.market.create_buy_order(listing.knife_name, price, 1, GameOptions.CS, Currency.EURO)
         
     except Exception as e:
-        logger.error("Failed to put the buy order on the knife " + listing.get('knife_name') + ", skipping...")
-        logger.error(e)
+        logger.error(f"Failed to put the buy order on the knife {listing.knife_name}, skipping...")
+        logger.error(str(e))
         return False, -1
     if response.get('success') != 1:
         return False, -1
     else:
-        logger.info(f"Successfully put the buy order on the knife {listing.get('knife_name')} at price {price / 100.0}")
+        logger.info(f"Successfully put the buy order on the knife {listing.knife_name} at price {price / 100.0}")
         return True, int(response.get('buy_orderid'))
 
 def cancel_orders(orders):
@@ -209,7 +235,7 @@ def amend_orders(orders):
     add_knives_to_csv(successfully_amended, file_path)
     return unsuccessfully_amended
 
-def get_wallet_balance(steam_client):
+def get_wallet_balance(steam_client: SteamClient) -> Tuple[bool, float]:
         try:
             wallet_balance = steam_client.get_wallet_balance()
             assert isinstance(wallet_balance, Decimal)
@@ -224,7 +250,7 @@ if __name__ == "__main__":
     load_dotenv()
     logger = CustomLogger(log_file="order_maxer.log", log_level="[INFO]")
 
-    connection, cursor = connect_to_db('localhost', 'knives', '3306', 'root', '')
+    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
     driver, user_data_dir = initialize_driver(True)
     login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
     steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'], login_cookies=login_cookies)
@@ -287,35 +313,48 @@ if __name__ == "__main__":
             # so if you change the buy orders manually through steam it gets fuckd
 
             for knife_order in knife_orders_file:
-                knife_name = knife_order['item_name']
+                knife_name = knife_order.get('item_name')
+                if(knife_name is None):
+                    continue
                 knife_listing = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
                 if knife_listing is None:
                     continue
                 save_knives_to_db([knife_listing], cursor, connection)
-                current_buy_order_price = float(knife_order['price'])
-                if(knife_listing["buy_order_price"] is None):
+
+                current_buy_order_price = knife_order.get('price')
+                if(current_buy_order_price is None):
+                    logger.error(f"{knife_name} order has no price, skipping...")
+                    continue
+                current_buy_order_price = float(current_buy_order_price)
+
+                if(knife_listing.buy_order_price is None):
                     logger.error(f"Buy order price is None {knife_name}")
                     continue
-                price_difference = knife_listing["buy_order_price"] - current_buy_order_price
-                if (price_difference > 0) and (knife_listing["buy_order_price"] < float(knife_order["max_price"])):
+                price_difference = knife_listing.buy_order_price - current_buy_order_price
+                knife_max_price = knife_order.get('max_price')
+                if(knife_max_price is None):
+                    logger.error(f"{knife_name} order has no max price, skipping...")
+                    continue
+                knife_max_price = float(knife_max_price)
+                if (price_difference > 0) and (knife_listing.buy_order_price < knife_max_price):
                     if(cancel_order(knife_order)):
-                        if knife_listing["buy_order_price"] < wallet_balance:
-                            success, id = put_order(knife_listing, knife_listing["buy_order_price"] * 100 + 1)
+                        if knife_listing.buy_order_price < wallet_balance:
+                            success, id = put_order(knife_listing, int(knife_listing.buy_order_price * 100 + 1))
                             if(success):
                                 delete_knives_from_csv([knife_name], file_path)
                                 new_order = knife_order
-                                new_order['price'] = round_up_decimal(knife_listing["buy_order_price"] + 0.01)
+                                new_order['price'] = round_up_decimal(knife_listing.buy_order_price + 0.01)
                                 new_order['order_id'] = id
                                 add_knives_to_csv([new_order], file_path)
                         else:
-                            success, id = put_order(knife_listing, wallet_balance*100)
+                            success, id = put_order(knife_listing, int(wallet_balance*100))
                             if(success):
                                 delete_knives_from_csv([knife_name], file_path)
                                 new_order = knife_order
                                 new_order['price'] = round_up_decimal(wallet_balance)
                                 new_order['order_id'] = id
                                 add_knives_to_csv([new_order], file_path)
-                elif(current_buy_order_price >= float(knife_order["max_price"])):
+                elif(current_buy_order_price >= float(knife_max_price)):
                     if(knife_order.get('action') == 'cancel' and cancel_order(knife_order)):
                         logger.info(f"Canceled order on knife {knife_name} because price is bigger than maximum set.")
                     
@@ -327,4 +366,4 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             logger.info("\n Canceling loop and shutting down...")
             break
-    shutil.rmtree(user_data_dir)
+    exit_gracefully(driver, connection, user_data_dir, 0)
