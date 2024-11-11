@@ -150,6 +150,7 @@ def extract_knife_data(driver: WebDriver, url: str, wait_time: int) -> Extracted
     #print(current_min_price_without_fee_text)
     #print(message)
     #print("+++++++++++++++++")
+    #TODO: Clean up this mess
     if len(message) == 0:
         message_div = soup.find('div', id='message')
         if(message_div is not None):
@@ -190,7 +191,7 @@ def get_and_save_historical_pricing_helper(data: List[List], date_format: str, c
         parsed_date = datetime.strptime(date_string, date_format)
         price = result[1]
         sold_count = result[2]
-        #TODO:           sell_time_id
+        #TODO:                 sell_time_id
         cursor.execute("SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
         existing_date = cursor.fetchone()
         if not existing_date:
@@ -290,6 +291,7 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
         if "made too many requests" in data['message']:
             #TODO: The detection is somehow wrong idk... steam bans us but we can continue anyways
             logger.critical(f"Too many requests {name}, stopping...")
+            logger.critical(f"Message: {data['message']}")
             exit(1)
             return None
         

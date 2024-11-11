@@ -25,16 +25,23 @@ def round_up_decimal(number: float | str) -> float:
     return float(Decimal(str(number)).quantize(Decimal('0.01'), rounding=ROUND_CEILING))
 
 def get_price_from_user(actual_listing: Dict) -> float:
+    name = actual_listing.get('item_name')
+    if(name is None):
+        logger.critical("Unexpectedly the item doesn't have a name, exiting...")
+        exit_gracefully(driver, connection, user_data_dir, 1)
+    price = actual_listing.get('price')
+    if(price is None):
+        logger.critical(f"Unexpectedly the {name} doesnt have your buy order, exiting...")
+        exit_gracefully(driver, connection, user_data_dir, 1)
+    assert price is not None
+    price = float(price)
     while True:
         try:
-            max_price = round_up_decimal(input(f"Set the maximum buy order at max for this item: {actual_listing.get('item_name')}, your current buy order price: {actual_listing.get('price')}\n"))
-            if(actual_listing.get('price') is None):
-                logger.critical(f"Unexpectedly the {actual_listing.get('item_name')} doesnt have your buy order, exiting...")
-                exit_gracefully(driver, connection, user_data_dir, 1)
-            if(max_price > float(actual_listing.get('price', 0.0))):
+            max_price = round_up_decimal(input(f"Set the maximum buy order at max for this item: {name}, your current buy order price: {price}\n"))
+            if(max_price > price):
                 return max_price
             else:
-                print(f"Please provide a bigger price than {actual_listing.get('price')}")
+                print(f"Please provide a bigger price than {price}")
         except ValueError:
             print("Invalid input. Please enter a valid number.")
 
@@ -68,7 +75,7 @@ def filter_listings_to_knives(listings: Dict) -> List[Dict]:
     if(orders is None):
         logger.critical("Unexpectedly there are no buy orders, exiting...")
         exit_gracefully(driver, connection, user_data_dir, 1)
-        return knife_orders
+    assert orders is not None
     for order_id in orders:
         actual_listing = orders.get(order_id)
         game_name = actual_listing.get('game_name')
@@ -113,7 +120,7 @@ def delete_knives_from_csv(knives_to_delete: List[str] | Set[str], file_path: st
         if not reader.fieldnames:
             logger.critical("Unexpectedly csv file has no headers while deleting, exiting...")
             exit_gracefully(driver, connection, user_data_dir, 1)
-            return
+        assert reader.fieldnames is not None
         rows = [row for row in reader if row[column_to_check] not in knives_to_delete]
 
     with open(file_path, 'w', newline='', encoding='utf-8') as file:
@@ -161,7 +168,6 @@ def check_for_missing_orders(actual: List[Dict], file: List[Dict], file_path: st
     file_orders = {item['item_name'] for item in file}
     missing_in_actual = file_orders - actual_orders
     for element in missing_in_actual:
-        #logging.info(f"Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
         logger.info(f"INFO: Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
     delete_knives_from_csv(missing_in_actual, file_path)
 
@@ -250,8 +256,6 @@ if __name__ == "__main__":
     load_dotenv()
     logger = CustomLogger(log_file="order_maxer.log", log_level="[INFO]")
 
-    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
-    driver, user_data_dir = initialize_driver(True)
     login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
     steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'], login_cookies=login_cookies)
     #steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'])
@@ -302,7 +306,8 @@ if __name__ == "__main__":
     
     for order in knife_orders_file:
         logger.info(f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
-    
+    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
+    driver, user_data_dir = initialize_driver(True)
     while True:
         try:
             success, wallet_balance = get_wallet_balance(steam_client)
