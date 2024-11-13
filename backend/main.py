@@ -170,12 +170,11 @@ def extract_knife_data_with_retry(driver: WebDriver, url: str, wait_time: int) -
     data = None
     for _ in range(retries):
         data = extract_knife_data(driver, url, wait_time)
-
-        if(isinstance(data['message'], str)):
-            if "many" not in data['message']:
+        if(isinstance(data.get('message'), str)):
+            if "many" not in data.get('message'):
                 return data
         else:
-            if not data['message'] or "error" not in data['message'][0].text or "too many requests" not in data['message'][0].text:
+            if not data.get('message') or "error" not in data.get('message')[0].text or "too many requests" not in data.get('message')[0].text:
                 return data
         time.sleep(10)
         #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
@@ -237,7 +236,7 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
 
         # If data is not null, break out of the loop
         if console_log_result is not None:
-            if json.loads(console_log_result)['data'] is not None:
+            if json.loads(console_log_result).get('data') is not None:
                 break
 
         current_attempt += 1
@@ -247,7 +246,7 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
         logger.error(f"Could not execute javascript {name}")
         return None, None
     console_log_result_json = json.loads(console_log_result)
-    data = console_log_result_json['data'] #date, price, count
+    data = console_log_result_json.get('data') #date, price, count
     if data is None:
         logger.error(f"Could not parse json {name}")
         return None, None
@@ -286,32 +285,31 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
         return None
     current_price = True
     # Handle cases where there is an error message
-
-    if(isinstance(data['message'], str)):
-        if "made too many requests" in data['message']:
+    if(isinstance(data.get('message'), str)):
+        if "made too many requests" in data.get('message'):
             #TODO: The detection is somehow wrong idk... steam bans us but we can continue anyways
             logger.critical(f"Too many requests {name}, stopping...")
-            logger.critical(f"Message: {data['message']}")
+            logger.critical(f"Message: {data.get('message')}")
             exit(1)
             return None
         
-        if "no listings" in data['message']:
+        if "no listings" in data.get('message'):
             current_price = False
     else:
-        if data['message'] and data['message'][0].text: 
+        if data.get('message') and data.get('message')[0].text: 
             logger.error(f"Steam buggin {name}")
             time.sleep(10)
             return None
 
     # Handle cases where required data is not available
     buy_orders = True
-    if len(data['buy_orders']) < 2:
+    if len(data.get('buy_orders')) < 2:
         #print(data['buy_orders'])
         logger.error(f"No buy orders {name}")
         buy_orders = False
         #return None
     
-    if len(data['current_min_price_with_fee']) < 1:
+    if len(data.get('current_min_price_with_fee')) < 1:
         logger.info(f"No current price {name}")
         current_price = False
         #return None
@@ -319,7 +317,7 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
     current_min_price_with_fee = None
     #current_min_price_without_fee = None
     if(current_price):
-        text = data['current_min_price_with_fee'][0].strip().replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "")
+        text = data.get('current_min_price_with_fee')[0].strip().replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "")
         try:
             current_min_price_with_fee = float(text)
         except Exception as e:
@@ -333,7 +331,7 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
         
     buy_order_price = None
     if(buy_orders):
-        buy_order_price = float(data['buy_orders'][1].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
+        buy_order_price = float(data.get('buy_orders')[1].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
 
     # Extract knife_id using regular expression
     knife_id = None
@@ -469,7 +467,7 @@ def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
         return None  # If no knife is found, return None
 
 
-def connect_to_db(host: str, database: str, port: int, user: str, password: str) -> Tuple[MySQLConnection, MySQLCursor]:
+def connect_to_db(host: str, database: str, port: int, user: str, password: str, logger: CustomLogger) -> Tuple[MySQLConnection, MySQLCursor]:
     try:
         sql_connection = mysql.connector.connect(host=host, database=database, port=port, user=user, password=password)
         if sql_connection.is_connected():

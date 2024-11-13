@@ -1,7 +1,7 @@
 import os
 import csv
 import shutil
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, InvalidOperation
 import time
 from typing import Dict, List, Set, Tuple
 from dotenv import load_dotenv
@@ -42,7 +42,7 @@ def get_price_from_user(actual_listing: Dict) -> float:
                 return max_price
             else:
                 print(f"Please provide a bigger price than {price}")
-        except ValueError:
+        except (ValueError, InvalidOperation):
             print("Invalid input. Please enter a valid number.")
 
 def get_action_from_user() -> str:
@@ -145,10 +145,10 @@ def load_orders_from_csv(file_path: str) -> List[Dict]:
 #Difference found in order ★ StatTrak™ Bowie Knife | Autotronic (Minimal Wear)
 #  Column 'price': '224.60' (actual) vs '224.6' (file
 def compare_orders(actual: List[Dict], file: List[Dict], file_path: str) -> None:
-    dict2 = {item['item_name']: item for item in file}
+    dict2 = {item.get('item_name'): item for item in file}
     missing = list()
     for item1 in actual:
-        name = item1['item_name']
+        name = item1.get('item_name')
         item2 = dict2.get(name)
 
         if item2:
@@ -164,8 +164,8 @@ def compare_orders(actual: List[Dict], file: List[Dict], file_path: str) -> None
     add_knives_to_csv(missing, file_path)
 
 def check_for_missing_orders(actual: List[Dict], file: List[Dict], file_path: str) -> None:
-    actual_orders = {item['item_name'] for item in actual}
-    file_orders = {item['item_name'] for item in file}
+    actual_orders = {item.get('item_name') for item in actual}
+    file_orders = {item.get('item_name') for item in file}
     missing_in_actual = file_orders - actual_orders
     for element in missing_in_actual:
         logger.info(f"INFO: Order {element} is missing, you either already bought it or manually canceled it. We will delete it from csv.")
@@ -256,9 +256,9 @@ if __name__ == "__main__":
     load_dotenv()
     logger = CustomLogger(log_file="order_maxer.log", log_level="[INFO]")
 
-    login_cookies = {'steamLoginSecure': os.environ['STEAM_COOKIE_STEAM_LOGIN_SECURE']}  # provide dict with cookies
-    steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'], login_cookies=login_cookies)
-    #steam_client = SteamClient(os.environ['STEAM_API'], username=os.environ['STEAM_USERNAME'])
+    login_cookies = {'steamLoginSecure': os.environ.get('STEAM_COOKIE_STEAM_LOGIN_SECURE')}  # provide dict with cookies
+    steam_client = SteamClient(os.environ.get('STEAM_API'), username=os.environ.get('STEAM_USERNAME'), login_cookies=login_cookies)
+    #steam_client = SteamClient(os.environ.get('STEAM_API'), username=os.environ.get('STEAM_USERNAME'))
     assert steam_client.was_login_executed
     success, wallet_balance = get_wallet_balance(steam_client)
     while(not success):
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     
     for order in knife_orders_file:
         logger.info(f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}")
-    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
+    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
     driver, user_data_dir = initialize_driver(True)
     while True:
         try:
