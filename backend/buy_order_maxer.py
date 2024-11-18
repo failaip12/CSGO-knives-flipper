@@ -257,6 +257,7 @@ if __name__ == "__main__":
     logger = CustomLogger(log_file="order_maxer.log", log_level="[INFO]")
 
     login_cookies = {'steamLoginSecure': os.environ.get('STEAM_COOKIE_STEAM_LOGIN_SECURE')}  # provide dict with cookies
+    #TODO: Extract and update the cookie using selenium
     steam_client = SteamClient(os.environ.get('STEAM_API'), username=os.environ.get('STEAM_USERNAME'), login_cookies=login_cookies)
     #steam_client = SteamClient(os.environ.get('STEAM_API'), username=os.environ.get('STEAM_USERNAME'))
     assert steam_client.was_login_executed

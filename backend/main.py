@@ -275,10 +275,11 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
         price, parsed_date = get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id)
     return price, parsed_date
 
-
+#TODO: Add failed knives to a csv or something
 def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     url = f"https://steamcommunity.com/market/listings/730/{name}"
     logger.info(f"Processing knife {name}")
+
     # Extract knife data with retries
     data = extract_knife_data_with_retry(driver, url, wait_time)
     if(data is None):
@@ -296,7 +297,8 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
         if "no listings" in data.get('message'):
             current_price = False
     else:
-        if data.get('message') and data.get('message')[0].text: 
+        if data.get('message') and data.get('message')[0].text:
+            #TODO: Add a retry mechanism
             logger.error(f"Steam buggin {name}")
             time.sleep(10)
             return None
@@ -554,7 +556,7 @@ def initialize_driver(headless: bool) -> Tuple[WebDriver, str]:
 
 def connect_to_db_threaded() -> Tuple[MySQLConnection, MySQLCursor]:
     # Create a new connection per thread
-    return connect_to_db('localhost', 'knives', 3306, 'root', '')
+    return connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
 def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger) -> None:
     batch_size = 15
@@ -577,7 +579,7 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
 
 #TODO: Ctrl C to properly close and clean up
 def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> None:
-    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
+    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
     knife_names = get_knife_list_from_db(sql_cursor, date)
     #get_knife_info("★ Bayonet", chrome_driver, sql_cursor, sql_connection)
