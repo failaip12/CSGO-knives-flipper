@@ -10,6 +10,7 @@ import threading
 import os
 import random
 import string
+import csv
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from pathlib import Path
 
@@ -446,9 +447,9 @@ def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQ
 
 def get_knife_list_from_db(cursor: MySQLCursor, date: Optional[str] = None) -> List[Tuple[str]]:
     if(date is None):
-        select_query = "SELECT knife_name FROM knives"
+        select_query = "SELECT knife_name FROM knives ORDER BY last_updated ASC"
     else:
-        select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date}"
+        select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date} ORDER BY last_updated ASC"
     cursor.execute(select_query)
     knife_list = cursor.fetchall()
     return knife_list
@@ -566,7 +567,16 @@ def connect_to_db_threaded() -> Tuple[MySQLConnection, MySQLCursor]:
     # Create a new connection per thread
     return connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
+def log_failed_knives(failed_knives: List[str]) -> None:
+    """Log the names of knives that failed to fetch into a CSV file."""
+    with open('failed_knives.csv', mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        for knife in failed_knives:
+            writer.writerow([knife])  # Log the failed knife name or other relevant info
+
 def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger) -> None:
+    failed_knives = []
+    fail_batch_size = 15
     batch_size = 15
     connection, cursor = connect_to_db_threaded()
     # Initialize the driver once per thread
@@ -587,12 +597,19 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
         knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time, logger)
         if knife_info:
             batch.append(knife_info)
+        else:
+            failed_knives.append(knife_name[0])
             
         progress_bar.update(1)
         if(len(batch) == batch_size):
             save_knives_to_db(batch, cursor, connection)
             batch.clear()
-
+        if len(failed_knives) == fail_batch_size:
+            log_failed_knives(failed_knives)  # Log all failed knives for this batch
+            failed_knives.clear()  # Clear the list for the next batch
+    
+    if failed_knives:
+        log_failed_knives(failed_knives)
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
     connection.close()
@@ -660,7 +677,6 @@ def handle_shutdown(signal, frame):
 
     # Set the shutdown event, which threads can check to gracefully exit
     shutdown_event.set()
-    raise KeyboardInterrupt
     # Perform cleanup for each thread's resources
     for thread in threading.enumerate():
         if hasattr(thread, 'resources'):
@@ -673,8 +689,6 @@ def handle_shutdown(signal, frame):
                 resources.cursor.close()
             if getattr(resources, 'user_data_dir', None):
                 shutil.rmtree(resources.user_data_dir)
-
-    raise KeyboardInterrupt
     # Exit the program cleanly
     sys.exit(0)
 
