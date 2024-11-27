@@ -626,13 +626,13 @@ if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
 
     # Update the StreamHandler to explicitly use UTF-8 encoding
-    #update_all_knife_data()
-    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
-    knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
-    driver, user_data_dir = initialize_driver(False)
-    knife_info = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
-    driver.quit()
-    shutil.rmtree(user_data_dir)
+    update_all_knife_data()
+    #connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    #knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
+    #driver, user_data_dir = initialize_driver(False)
+    #knife_info = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
+    #driver.quit()
+    #shutil.rmtree(user_data_dir)
     #update_all_knife_data("'2024-11-03'")
     #get_knife_info("★ StatTrak™ Flip Knife | Bright Water (Battle-Scarred)")
     # Update Knife List
