@@ -11,7 +11,7 @@ from steampy.models import GameOptions, Currency
 
 from Knife import Knife
 from main import safe_get_knife_info, save_knives_to_db, connect_to_db, initialize_driver
-from CustomLogger import CustomLogger
+from CustomLogger import CustomLogger, LogLevel
 from selenium.webdriver.chrome.webdriver import WebDriver
 from mysql.connector.connection import MySQLConnection
 
@@ -254,7 +254,7 @@ def get_wallet_balance(steam_client: SteamClient) -> Tuple[bool, float]:
 
 if __name__ == "__main__":
     load_dotenv()
-    logger = CustomLogger(log_file="order_maxer.log", log_level="[INFO]")
+    logger = CustomLogger(log_file="order_maxer.log", log_level=LogLevel.INFO)
 
     login_cookies = {'steamLoginSecure': os.environ.get('STEAM_COOKIE_STEAM_LOGIN_SECURE')}  # provide dict with cookies
     #TODO: Extract and update the cookie using selenium

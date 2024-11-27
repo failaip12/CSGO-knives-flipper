@@ -30,7 +30,7 @@ from mysql.connector.cursor import MySQLCursor
 
 from multiprocessing.dummy import Pool as ThreadPool
 
-from CustomLogger import CustomLogger
+from CustomLogger import CustomLogger, LogLevel
 from Knife import Knife
 ExtractedData = Dict[str, List[Any]]
 
@@ -623,7 +623,7 @@ def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> Non
 
 
 if __name__ == "__main__":
-    logger = CustomLogger(log_file="knives.log", log_level="[INFO]")
+    logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
 
     # Update the StreamHandler to explicitly use UTF-8 encoding
     #update_all_knife_data()
