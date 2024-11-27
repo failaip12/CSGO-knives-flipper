@@ -8,10 +8,11 @@ import os
 import random
 import string
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from pathlib import Path
 
 import mysql.connector
 from bs4 import BeautifulSoup, NavigableString, ResultSet, Tag
-from seleniumwire import webdriver
+from seleniumwire2 import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -289,8 +290,8 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
     if(isinstance(data.get('message'), str)):
         if "made too many requests" in data.get('message'):
             #TODO: The detection is somehow wrong idk... steam bans us but we can continue anyways
-            logger.critical(f"Too many requests {name}, stopping...")
-            logger.critical(f"Message: {data.get('message')}")
+            logger.fatal(f"Too many requests {name}, stopping...")
+            logger.fatal(f"Message: {data.get('message')}")
             exit(1)
             return None
         
@@ -475,11 +476,11 @@ def connect_to_db(host: str, database: str, port: int, user: str, password: str,
         if sql_connection.is_connected():
             sql_cursor = sql_connection.cursor()
         else:
-            logger.critical("SQL connection error, likely invalid connection parameters")
+            logger.fatal("SQL connection error, likely invalid connection parameters")
             exit(1)
 
     except Error as e:
-        logger.critical("SQL connection error " + str(e))
+        logger.fatal("SQL connection error " + str(e))
         exit(1)
     return sql_connection, sql_cursor
 
@@ -538,8 +539,12 @@ def copy_user_data_dir(source_dir: str) -> str:
     return temp_dir
 
 def initialize_driver(headless: bool) -> Tuple[WebDriver, str]:
-    # Specify the original user data directory that you want to copy from
-    original_user_data_dir = "C:/Filip_projekti/steam amrket boi/chrome-cache"  #TODO: Use pathlib and relative paths
+    project_root = Path(__file__).parent  # This will get the directory where this script is located
+    original_user_data_dir = project_root / "chrome-cache"  # Relative path to 'chrome-cache' directory
+
+    # Ensure the path is valid
+    if not original_user_data_dir.exists():
+        raise FileNotFoundError(f"User data directory {original_user_data_dir} does not exist.")
 
     # Copy the user-data-dir to a new unique directory for this thread
     user_data_dir = copy_user_data_dir(original_user_data_dir)
@@ -592,7 +597,7 @@ def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> Non
         #    print(f"Greška u azuriranju noza {knife_name[0]}", e)
         #    continue
     # Define the ThreadPool and number of threads
-    thread_count = 8
+    thread_count = 4
     chunk_size = len(knife_names) // thread_count
     knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
 
@@ -621,13 +626,13 @@ if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level="[INFO]")
 
     # Update the StreamHandler to explicitly use UTF-8 encoding
-    update_all_knife_data()
-    #connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '')
-    #knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
-    #driver, user_data_dir = initialize_driver(False)
-    #knife_info = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
-    #driver.quit()
-    #shutil.rmtree(user_data_dir)
+    #update_all_knife_data()
+    connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
+    driver, user_data_dir = initialize_driver(False)
+    knife_info = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
+    driver.quit()
+    shutil.rmtree(user_data_dir)
     #update_all_knife_data("'2024-11-03'")
     #get_knife_info("★ StatTrak™ Flip Knife | Bright Water (Battle-Scarred)")
     # Update Knife List

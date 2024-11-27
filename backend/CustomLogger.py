@@ -7,7 +7,7 @@ class CustomLogger:
         "[INFO]": 20,
         "[WARNING]": 30,
         "[ERROR]": 40,
-        "[CRITICAL]": 50
+        "[FATAL]": 50
     }
 
     def __init__(self, log_file: str="app.log", log_level: str="[INFO]") -> None:
@@ -54,5 +54,5 @@ class CustomLogger:
     def error(self, message: str) -> None:
         self._log("[ERROR]", message)
     
-    def critical(self, message: str) -> None:
-        self._log("[CRITICAL]", message)
+    def fatal(self, message: str) -> None:
+        self._log("[FATAL]", message)

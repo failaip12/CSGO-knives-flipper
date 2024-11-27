@@ -27,11 +27,11 @@ def round_up_decimal(number: float | str) -> float:
 def get_price_from_user(actual_listing: Dict) -> float:
     name = actual_listing.get('item_name')
     if(name is None):
-        logger.critical("Unexpectedly the item doesn't have a name, exiting...")
+        logger.fatal("Unexpectedly the item doesn't have a name, exiting...")
         exit_gracefully(driver, connection, user_data_dir, 1)
     price = actual_listing.get('price')
     if(price is None):
-        logger.critical(f"Unexpectedly the {name} doesnt have your buy order, exiting...")
+        logger.fatal(f"Unexpectedly the {name} doesnt have your buy order, exiting...")
         exit_gracefully(driver, connection, user_data_dir, 1)
     assert price is not None
     price = float(price)
@@ -73,7 +73,7 @@ def filter_listings_to_knives(listings: Dict) -> List[Dict]:
     knife_orders: List[Dict] = list()
     orders = listings.get('buy_orders')
     if(orders is None):
-        logger.critical("Unexpectedly there are no buy orders, exiting...")
+        logger.fatal("Unexpectedly there are no buy orders, exiting...")
         exit_gracefully(driver, connection, user_data_dir, 1)
     assert orders is not None
     for order_id in orders:
@@ -118,7 +118,7 @@ def delete_knives_from_csv(knives_to_delete: List[str] | Set[str], file_path: st
     with open(file_path, 'r', encoding='utf-8') as file:
         reader = csv.DictReader(file)
         if not reader.fieldnames:
-            logger.critical("Unexpectedly csv file has no headers while deleting, exiting...")
+            logger.fatal("Unexpectedly csv file has no headers while deleting, exiting...")
             exit_gracefully(driver, connection, user_data_dir, 1)
         assert reader.fieldnames is not None
         rows = [row for row in reader if row[column_to_check] not in knives_to_delete]
