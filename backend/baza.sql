@@ -53,7 +53,7 @@ ENGINE = InnoDB;
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `knives`.`SellHistory` (
   `sell_history_id` INT NOT NULL AUTO_INCREMENT,
-  `knife_id` INT NOT NULL,
+  `knife_id` INT UNSIGNED NOT NULL,
   `sell_time_id` INT NOT NULL,
   `price` DECIMAL NOT NULL,
   `quantity` INT NOT NULL,
