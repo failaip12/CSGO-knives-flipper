@@ -191,11 +191,10 @@ def get_and_save_historical_pricing_helper(data: List[List], date_format: str, c
         parsed_date = datetime.strptime(date_string, date_format)
         price = result[1]
         sold_count = result[2]
-        #TODO:                 sell_time_id
         cursor.execute("SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
         existing_date = cursor.fetchone()
         if not existing_date:
-            cursor.execute("INSERT INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,))
+            cursor.execute("INSERT IGNORE INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,))
             connection.commit()
             date_id = cursor.lastrowid
         else:
