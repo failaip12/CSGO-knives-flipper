@@ -32,6 +32,7 @@ from multiprocessing.dummy import Pool as ThreadPool
 
 from CustomLogger import CustomLogger, LogLevel
 from Knife import Knife
+
 ExtractedData = Dict[str, List[Any]]
 
 
@@ -580,6 +581,8 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
 
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
+    connection.close()
+    cursor.close()
 
 #TODO: Ctrl C to properly close and clean up
 def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> None:
@@ -619,7 +622,6 @@ def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> Non
 
     sql_cursor.close()
     sql_connection.close()
-
 
 if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
