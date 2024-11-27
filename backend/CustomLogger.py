@@ -47,7 +47,7 @@ class CustomLogger:
 
     def _log(self, level: LogLevel, message: str) -> None:
         """Log a message if the log level is higher than the current set level."""
-        if level.value < self.log_level.value:  # Direct comparison of enums, no need for a dictionary
+        if level.value < self.log_level.value:
             return
 
         formatted_message = self._get_formatted_message(level, message)

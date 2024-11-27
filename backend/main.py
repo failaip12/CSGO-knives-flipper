@@ -3,7 +3,10 @@ import time
 import re
 import json
 import tempfile
+import signal
+import sys
 import shutil
+import threading
 import os
 import random
 import string
@@ -279,7 +282,7 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
 #TODO: Add failed knives to a csv or something
 def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     url = f"https://steamcommunity.com/market/listings/730/{name}"
-    logger.info(f"Processing knife {name}")
+    #logger.info(f"Processing knife {name}")
 
     # Extract knife data with retries
     data = extract_knife_data_with_retry(driver, url, wait_time)
@@ -569,7 +572,18 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
     # Initialize the driver once per thread
     driver, user_data_dir = initialize_driver(True)
     batch = list()
+
+    # Store thread-specific resources in thread-local storage
+    thread_resources.driver = driver
+    thread_resources.connection = connection
+    thread_resources.cursor = cursor
+    thread_resources.user_data_dir = user_data_dir
+
     for knife_name in knife_names:
+        if shutdown_event.is_set():
+            logger.info("Shutdown signal received. Exiting thread...")
+            break
+
         knife_info = safe_get_knife_info(knife_name, driver, cursor, connection, wait_time, logger)
         if knife_info:
             batch.append(knife_info)
@@ -586,43 +600,86 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
 
 #TODO: Ctrl C to properly close and clean up
 def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> None:
-    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    try:
+        # Connect to the database
+        sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
-    knife_names = get_knife_list_from_db(sql_cursor, date)
-    #get_knife_info("★ Bayonet", chrome_driver, sql_cursor, sql_connection)
-    #time.sleep(1000)
-    #for knife_name in tqdm(knife_names):
-        #try:
-        #knife_info = get_knife_info(knife_name[0], chrome_driver, sql_cursor, sql_connection, wait_time)
-        #save_knife_to_db([knife_info], sql_cursor, sql_connection)
-        #except Error as e:
-        #    print(f"Greška u azuriranju noza {knife_name[0]}", e)
-        #    continue
-    # Define the ThreadPool and number of threads
-    thread_count = 4
-    chunk_size = len(knife_names) // thread_count
-    knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
+        # Get knife names from the database
+        knife_names = get_knife_list_from_db(sql_cursor, date)
+        
+        # Define ThreadPool parameters
+        thread_count = 4
+        chunk_size = len(knife_names) // thread_count
+        knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
 
-    # Initialize tqdm for the overall progress of knives
-    total_knives = len(knife_names)
-    progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
-    # Function to update progress bar as each chunk finishes
-    with ThreadPool(thread_count) as pool:
-        # Use imap_unordered to process the chunks and update progress for each chunk
-        for _ in pool.imap_unordered(lambda chunk: fetch_all_knives_for_thread(chunk, wait_time, progress_bar, logger), knife_name_chunks):
-            pass
+        # Initialize the progress bar
+        total_knives = len(knife_names)
+        progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
 
-    progress_bar.close()  # Close the progress bar after completion
+        # Process chunks with a ThreadPool
+        with ThreadPool(thread_count) as pool:
+            try:
+                for _ in pool.imap_unordered(
+                    lambda chunk: fetch_all_knives_for_thread(chunk, wait_time, progress_bar, logger), 
+                    knife_name_chunks
+                ):
+                    if shutdown_event.is_set():
+                        break
+            except KeyboardInterrupt:
+                pool.terminate()
+            finally:
+                pool.terminate()
 
-    pool.close()
-    pool.join()
+        progress_bar.close()  # Close the progress bar after completion
+
+        # Update database with additional calculations
+        update_amount_sold(sql_cursor)
+        update_selling_frequency(sql_cursor)
+
+        # Close database resources
+        sql_cursor.close()
+        sql_connection.close()
+
+    except KeyboardInterrupt:
+        sql_cursor.close()
+        sql_connection.close()
+        logger.info("\nKeyboardInterrupt caught, initiating shutdown...")
+        handle_shutdown(None, None)  # Trigger the signal handler for a clean shutdown
     
-    update_amount_sold(sql_cursor)
-    update_selling_frequency(sql_cursor)
 
-    sql_cursor.close()
-    sql_connection.close()
 
+# Thread-local storage for managing resources for each thread
+thread_resources = threading.local()
+
+# An event to signal the threads to stop when interrupted
+shutdown_event = threading.Event()
+
+def handle_shutdown(signal, frame):
+    """Signal handler for graceful shutdown on Ctrl+C (SIGINT)."""
+    logger.info("\nReceived shutdown signal (Ctrl+C), cleaning up...")
+
+    # Set the shutdown event, which threads can check to gracefully exit
+    shutdown_event.set()
+    raise KeyboardInterrupt
+    # Perform cleanup for each thread's resources
+    for thread in threading.enumerate():
+        if hasattr(thread, 'resources'):
+            resources = thread.resources
+            if getattr(resources, 'driver', None):
+                resources.driver.quit()
+            if getattr(resources, 'connection', None):
+                resources.connection.close()
+            if getattr(resources, 'cursor', None):
+                resources.cursor.close()
+            if getattr(resources, 'user_data_dir', None):
+                shutil.rmtree(resources.user_data_dir)
+
+    raise KeyboardInterrupt
+    # Exit the program cleanly
+    sys.exit(0)
+
+# Register the signal handler for SIGINT (Ctrl+C)
+signal.signal(signal.SIGINT, handle_shutdown)
 if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
 
