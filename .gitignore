@@ -137,3 +137,4 @@ backend/tempCodeRunnerFile.py
 /.idea
 data.csv
 backend/failed_knives.csv
+*.csv

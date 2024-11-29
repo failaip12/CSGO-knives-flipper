@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 import time
 import re
@@ -280,7 +281,6 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
         price, parsed_date = get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id)
     return price, parsed_date
 
-#TODO: Add failed knives to a csv or something
 def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     url = f"https://steamcommunity.com/market/listings/730/{name}"
     #logger.info(f"Processing knife {name}")
@@ -303,10 +303,13 @@ def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection
             current_price = False
     else:
         if data.get('message') and data.get('message')[0].text:
-            #TODO: Add a retry mechanism
-            logger.error(f"Steam buggin {name}")
-            time.sleep(10)
-            return None
+            if("no listings" in data.get('message')[0].text):
+                current_price = False
+            else:
+                #TODO: Add a retry mechanism
+                logger.error(f"Steam buggin {name}")
+                time.sleep(10)
+                return None
 
     # Handle cases where required data is not available
     buy_orders = True
@@ -567,9 +570,9 @@ def connect_to_db_threaded() -> Tuple[MySQLConnection, MySQLCursor]:
     # Create a new connection per thread
     return connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
-def log_failed_knives(failed_knives: List[str]) -> None:
+def log_failed_knives(failed_knives: List[str], file_name) -> None:
     """Log the names of knives that failed to fetch into a CSV file."""
-    with open('failed_knives.csv', mode='a', newline='', encoding='utf-8') as file:
+    with open(file_name + "-" + datetime.now().strftime('%Y-%m-%d') + ".csv", mode='a', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         for knife in failed_knives:
             writer.writerow([knife])  # Log the failed knife name or other relevant info
@@ -605,16 +608,62 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
             save_knives_to_db(batch, cursor, connection)
             batch.clear()
         if len(failed_knives) == fail_batch_size:
-            log_failed_knives(failed_knives)  # Log all failed knives for this batch
+            log_failed_knives(failed_knives, failed_knives_name)  # Log all failed knives for this batch
             failed_knives.clear()  # Clear the list for the next batch
     
     if failed_knives:
-        log_failed_knives(failed_knives)
+        log_failed_knives(failed_knives, failed_knives_name)
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
     connection.close()
     cursor.close()
 
+def load_failed_knives_csv(file_name: str) -> List[Tuple[str]]:
+    """
+    Load a CSV file into a set.
+
+    Args:
+        file_path (str): Path to the CSV file.
+
+    Returns:
+        set: A set containing rows of the CSV file as tuples.
+    """
+    data_set = set()
+    csv_name = file_name + ".csv"
+    try:
+        with open(csv_name, mode='r', encoding='utf-8') as file:
+            csv_reader = csv.reader(file)
+            for row in csv_reader:
+                data_set.add((row[0],))  # Convert each row to a tuple and add to the set
+    except FileNotFoundError:
+        print(f"Error: File '{csv_name}' not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    return list(data_set)
+def process_knives(knife_names: List[Tuple[str]], wait_time: int = 6):
+    # Define ThreadPool parameters
+    thread_count = 4
+    chunk_size = len(knife_names) // thread_count
+    knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
+
+    # Initialize the progress bar
+    total_knives = len(knife_names)
+    progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
+
+    # Process chunks with a ThreadPool
+    with ThreadPoolExecutor(max_workers=thread_count) as executor:
+        futures = [executor.submit(fetch_all_knives_for_thread, chunk, wait_time, progress_bar, logger) 
+                for chunk in knife_name_chunks]
+        try:
+            for future in as_completed(futures):
+                if shutdown_event.is_set():
+                    break
+        except KeyboardInterrupt:
+            print("\nKeyboardInterrupt received. Cancelling tasks...")
+            for future in futures:
+                future.cancel()
+
+    progress_bar.close()  # Close the progress bar after completion
 #TODO: Ctrl C to properly close and clean up
 def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> None:
     try:
@@ -623,31 +672,7 @@ def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> Non
 
         # Get knife names from the database
         knife_names = get_knife_list_from_db(sql_cursor, date)
-        
-        # Define ThreadPool parameters
-        thread_count = 4
-        chunk_size = len(knife_names) // thread_count
-        knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
-
-        # Initialize the progress bar
-        total_knives = len(knife_names)
-        progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
-
-        # Process chunks with a ThreadPool
-        with ThreadPool(thread_count) as pool:
-            try:
-                for _ in pool.imap_unordered(
-                    lambda chunk: fetch_all_knives_for_thread(chunk, wait_time, progress_bar, logger), 
-                    knife_name_chunks
-                ):
-                    if shutdown_event.is_set():
-                        break
-            except KeyboardInterrupt:
-                pool.terminate()
-            finally:
-                pool.terminate()
-
-        progress_bar.close()  # Close the progress bar after completion
+        process_knives(knife_names, wait_time)
 
         # Update database with additional calculations
         update_amount_sold(sql_cursor)
@@ -694,13 +719,15 @@ def handle_shutdown(signal, frame):
 
 # Register the signal handler for SIGINT (Ctrl+C)
 signal.signal(signal.SIGINT, handle_shutdown)
+failed_knives_name = 'failed_knives'
 if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
-
+    names = load_failed_knives_csv(failed_knives_name)
+    process_knives(names)
     # Update the StreamHandler to explicitly use UTF-8 encoding
-    update_all_knife_data()
+    #update_all_knife_data()
     #connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
-    #knife_name = "★ Shadow Daggers | Marble Fade (Minimal Wear)"
+    #knife_name = "★ StatTrak™ Huntsman Knife | Case Hardened (Field-Tested)"
     #driver, user_data_dir = initialize_driver(False)
     #knife_info = safe_get_knife_info((knife_name, ), driver, cursor, connection, 6, logger)
     #driver.quit()
