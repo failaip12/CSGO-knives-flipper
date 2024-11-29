@@ -577,7 +577,7 @@ def log_failed_knives(failed_knives: List[str], file_name) -> None:
         for knife in failed_knives:
             writer.writerow([knife])  # Log the failed knife name or other relevant info
 
-def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger) -> None:
+def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger, failed_knives_name: str) -> None:
     failed_knives = []
     fail_batch_size = 15
     batch_size = 15
@@ -640,7 +640,7 @@ def load_failed_knives_csv(file_name: str) -> List[Tuple[str]]:
     except Exception as e:
         print(f"An error occurred: {e}")
     return list(data_set)
-def process_knives(knife_names: List[Tuple[str]], wait_time: int = 6):
+def process_knives(knife_names: List[Tuple[str]], failed_knives_name: str, wait_time: int = 6):
     # Define ThreadPool parameters
     thread_count = 4
     chunk_size = len(knife_names) // thread_count
@@ -652,7 +652,7 @@ def process_knives(knife_names: List[Tuple[str]], wait_time: int = 6):
 
     # Process chunks with a ThreadPool
     with ThreadPoolExecutor(max_workers=thread_count) as executor:
-        futures = [executor.submit(fetch_all_knives_for_thread, chunk, wait_time, progress_bar, logger) 
+        futures = [executor.submit(fetch_all_knives_for_thread, chunk, wait_time, progress_bar, logger, failed_knives_name) 
                 for chunk in knife_name_chunks]
         try:
             for future in as_completed(futures):
@@ -665,14 +665,14 @@ def process_knives(knife_names: List[Tuple[str]], wait_time: int = 6):
 
     progress_bar.close()  # Close the progress bar after completion
 #TODO: Ctrl C to properly close and clean up
-def update_all_knife_data(date: Optional[str] = None, wait_time: int = 6) -> None:
+def update_all_knife_data(failed_knives_name: str, date: Optional[str] = None, wait_time: int = 6) -> None:
     try:
         # Connect to the database
         sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
         # Get knife names from the database
         knife_names = get_knife_list_from_db(sql_cursor, date)
-        process_knives(knife_names, wait_time)
+        process_knives(knife_names, failed_knives_name, wait_time)
 
         # Update database with additional calculations
         update_amount_sold(sql_cursor)
@@ -719,12 +719,11 @@ def handle_shutdown(signal, frame):
 
 # Register the signal handler for SIGINT (Ctrl+C)
 signal.signal(signal.SIGINT, handle_shutdown)
-failed_knives_name = 'failed_knives'
 if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
-    names = load_failed_knives_csv(failed_knives_name)
-    process_knives(names)
-    # Update the StreamHandler to explicitly use UTF-8 encoding
+    
+    #names = load_failed_knives_csv("fk")
+    #process_knives(names, "new_fk")
     #update_all_knife_data()
     #connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
     #knife_name = "★ StatTrak™ Huntsman Knife | Case Hardened (Field-Tested)"
