@@ -1,8 +1,8 @@
-import time
+#import time
 from CustomLogger import CustomLogger, LogLevel
-from selenium_scraper import initialize_driver, steam_login, update_all_knife_data
+#from selenium_scraper import initialize_driver, steam_login, update_all_knife_data
 
-from seleniumwire2 import webdriver
+#from seleniumwire2 import webdriver
 if __name__ == "__main__":
     logger = CustomLogger(log_file="knives.log", log_level=LogLevel.INFO)
     

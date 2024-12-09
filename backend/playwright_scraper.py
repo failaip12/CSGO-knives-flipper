@@ -1,27 +1,33 @@
 from bisect import bisect_left
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
+import shutil
+import threading
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page
 from tqdm import tqdm
-from common import log_failed_knives
-from db_operations import connect_to_db, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_amount_sold, update_selling_frequency
+from common import copy_user_data_dir, log_failed_knives
+from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_amount_sold, update_selling_frequency
 from selenium_scraper import ExtractedData
 from mysql.connector.connection import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
 from CustomLogger import CustomLogger
 from Knife import Knife
+
 def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
     #page.evaluate("location.reload(true);") #TODO: May not be necessary
     #page = parse_page(url, driver)
     page.goto(url)
     #page.evaluate("window.scrollTo(0, 1000);")
-
+    
+    # We have a bit of a catch 22 here where we wait for the elements that may not exist, but checking for the other element which shows the fact that they dont exist takes the same amount of time
     try:
         page.wait_for_selector('//div[@id="market_commodity_buyrequests"]', state="visible", timeout=wait_time * 1000)
         page.wait_for_selector('//span[@class="market_commodity_orders_header_promote"]', state="visible", timeout=wait_time * 1000)
@@ -29,7 +35,6 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
         page.wait_for_selector('//span[@class="market_listing_price market_listing_price_without_fee"]', state="attached", timeout=wait_time * 1000)
     except:
         pass
-
     buy_orders_text = []
     current_min_price_with_fee_text = []
     #current_min_price_without_fee_text = None
@@ -70,12 +75,15 @@ def extract_knife_data_with_retry(page: Page, url: str, wait_time: int) -> Optio
     data = None
     for _ in range(retries):
         data = extract_knife_data(page, url, wait_time)
-        if(isinstance(data.get('message'), str)):
-            if "many" not in data.get('message'):
+        message = data.get('message')
+        if(isinstance(message, str)):
+            if "many" not in message:
                 return data
         else:
-            if not data.get('message') or "error" not in data.get('message')[0].text or "too many requests" not in data.get('message')[0].text:
+            if not message or "error" not in message[0].text or "too many requests" not in message[0].text:
                 return data
+        if message and message[0] and message[0].text and "no listings" in message[0].text:
+            return data
         time.sleep(10)
         #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
     return data
@@ -274,6 +282,90 @@ def safe_get_knife_info(name: Tuple[str], page: Page, cursor: MySQLCursor, conne
     except Exception as e:
         logger.error(f"Error processing knife {name[0]}: {e}")
         return None  # Return None or handle as needed
+def initialize_directory(logger: CustomLogger) -> str:
+    project_root = Path(__file__).parent  # This will get the directory where this script is located
+    original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
+    # Ensure the path is valid
+    if not original_user_data_dir.exists():
+        raise FileNotFoundError(f"User data directory {original_user_data_dir} does not exist.")
+
+    # Copy the user-data-dir to a new unique directory for this thread
+    user_data_dir = copy_user_data_dir(original_user_data_dir, logger, 'playwright_cache')
+    #print(user_data_dir)
+    return user_data_dir
+
+def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger, failed_knives_name: str) -> None:
+    failed_knives = list()
+    fail_batch_size = 15
+    batch = list()
+    batch_size = 15
+    # Store thread-specific resources in thread-local storage
+
+    with sync_playwright() as p:
+        connection, cursor = connect_to_db_threaded(host='localhost', database='knives', port=3306, user='root', password='', logger=logger)
+        # Initialize the driver once per thread
+        user_data_dir = initialize_directory(logger)
+
+        thread_resources.connection = connection
+        thread_resources.cursor = cursor
+        thread_resources.user_data_dir = user_data_dir
+
+        browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
+        page = browser.new_page()
+
+        thread_resources.page = page
+
+        for knife_name in knife_names:
+            if shutdown_event.is_set():
+                logger.info("Shutdown signal received. Exiting thread...")
+                break
+
+            knife_info = safe_get_knife_info(knife_name, page, cursor, connection, wait_time, logger)
+            if knife_info:
+                batch.append(knife_info)
+            else:
+                failed_knives.append(knife_name[0])
+                
+            progress_bar.update(1)
+            if(len(batch) == batch_size):
+                save_knives_to_db(batch, cursor, connection)
+                batch.clear()
+            if len(failed_knives) == fail_batch_size:
+                log_failed_knives(failed_knives, failed_knives_name)  # Log all failed knives for this batch
+                failed_knives.clear()  # Clear the list for the next batch
+    
+    if failed_knives:
+        log_failed_knives(failed_knives, failed_knives_name)
+    browser.close()  # Quit the driver after all knives in this thread are processed
+    shutil.rmtree(user_data_dir)
+    connection.close()
+    cursor.close()
+
+def process_knives(logger: CustomLogger, knife_names: List[Tuple[str]], failed_knives_name: str, wait_time: int = 6):
+    
+    # Define ThreadPool parameters
+    thread_count = 8
+    chunk_size = len(knife_names) // thread_count
+    knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
+
+    # Initialize the progress bar
+    total_knives = len(knife_names)
+    progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
+
+    # Process chunks with a ThreadPool
+    with ThreadPoolExecutor(max_workers=thread_count) as executor:
+        futures = [executor.submit(fetch_all_knives_for_thread, chunk, wait_time, progress_bar, logger, failed_knives_name) 
+                for chunk in knife_name_chunks]
+        try:
+            for future in as_completed(futures):
+                if shutdown_event.is_set():
+                    break
+        except KeyboardInterrupt:
+            print("\nKeyboardInterrupt received. Cancelling tasks...")
+            for future in futures:
+                future.cancel()
+
+    progress_bar.close()  # Close the progress bar after completion
 
 def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: Optional[str] = None, wait_time: int = 6):
     # Connect to the database
@@ -282,38 +374,49 @@ def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: O
     # Get knife names from the database
     knife_names = get_knife_list_from_db(sql_cursor, date)
     # Update database with additional calculations
-
-    with sync_playwright() as p:
-        user_data_dir = "./playwright_cache"
-        browser = p.chromium.launch_persistent_context(user_data_dir=user_data_dir, headless=False)
-        page = browser.new_page()
-        batch = list()
-        failed_knives = list()
-        fail_batch_size = 15
-        batch_size = 15
-        for knife_name in tqdm(knife_names):
-            knife_info = safe_get_knife_info(knife_name, page, sql_cursor, sql_connection, wait_time, logger)
-            if knife_info:
-                batch.append(knife_info)
-            else:
-                failed_knives.append(knife_name[0])
-            if(len(batch) == batch_size):
-                save_knives_to_db(batch, sql_cursor, sql_connection)
-                batch.clear()
-            if len(failed_knives) == fail_batch_size:
-                log_failed_knives(failed_knives, failed_knives_name)  # Log all failed knives for this batch
-                failed_knives.clear()  # Clear the list for the next batch
-        # Close the browser
-        browser.close()
-    
-    if failed_knives:
-        log_failed_knives(failed_knives, failed_knives_name)
+    process_knives(logger, knife_names, failed_knives_name, wait_time)
     update_amount_sold(sql_cursor)
     update_selling_frequency(sql_cursor)
 
     # Close database resources
     sql_cursor.close()
     sql_connection.close()
-if __name__ == "__main__":    
+def graceful_shutdown(signal_received, frame, sql_cursor, sql_connection):
+    # Close database connections
+    if sql_cursor:
+        print("closing sql_cursor")
+        sql_cursor.close()
+    if sql_connection:
+        print("closing sql_connection")
+        sql_connection.close()
+    print("closed sql_connection")
+    os._exit(0)
+shutdown_event = threading.Event()
+thread_resources = threading.local()
+def steam_login():
+    with sync_playwright() as p:
+        project_root = Path(__file__).parent  # This will get the directory where this script is located
+        original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
+        browser = p.chromium.launch_persistent_context(user_data_dir=original_user_data_dir, headless=False)
+        page = browser.new_page()
+        page.goto('https://steamcommunity.com')
+        browser.storage_state(path="storage.json")
+        print("Please log in manually. Close the browser when done.")
+        input("Press Enter after completing the login process...")
+        browser.close()
+if __name__ == "__main__":
     logger = CustomLogger()
+    #steam_login()    
+    #sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+
+    # Get knife names from the database
+    #knife_names = get_knife_list_from_db(sql_cursor)
+    #fetch_all_knives_for_thread(knife_names, 6, None, logger, 'failed_knives')
+    #with sync_playwright() as p:
+    #    browser = p.chromium.launch(headless=False)
+    #    context = browser.new_context(storage_state="storage.json")
+    #    page = browser.new_page()
+    #    page.goto('https://steamcommunity.com')
+    #    input("Press Enter after completing the login process...")
+    #    browser.close()
     update_all_knife_data('failed_knives', logger)

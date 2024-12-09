@@ -138,3 +138,6 @@ backend/tempCodeRunnerFile.py
 data.csv
 backend/failed_knives.csv
 *.csv
+*.prof
+/backend/playwright_cache
+backend/storage.json

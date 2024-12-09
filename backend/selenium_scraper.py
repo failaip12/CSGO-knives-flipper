@@ -1,17 +1,12 @@
 from bisect import bisect_left
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import csv
 from datetime import datetime
 import json
-import os
 from pathlib import Path
-import random
 import re
 import shutil
 import signal
-import string
 import sys
-import tempfile
 import threading
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -30,7 +25,7 @@ from mysql.connector.cursor import MySQLCursor
 
 from Knife import Knife
 from CustomLogger import CustomLogger
-from common import log_failed_knives
+from common import copy_user_data_dir, log_failed_knives
 from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_amount_sold, update_selling_frequency
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
@@ -372,7 +367,7 @@ def initialize_driver(headless: bool, logger: CustomLogger) -> Tuple[WebDriver, 
         raise FileNotFoundError(f"User data directory {original_user_data_dir} does not exist.")
 
     # Copy the user-data-dir to a new unique directory for this thread
-    user_data_dir = copy_user_data_dir(original_user_data_dir, logger)
+    user_data_dir = copy_user_data_dir(original_user_data_dir, logger, "chrome-cache")
     
     options = Options()
     if(headless):
@@ -393,32 +388,6 @@ def steam_login() -> WebDriver:
     chrome_driver = webdriver.Chrome(options=options)
     chrome_driver.request_interceptor = interceptor  # Attach interceptor here
     return chrome_driver
-
-def copy_user_data_dir(source_dir: str, logger: CustomLogger) -> str:
-    """
-    Copy the user data directory to a unique directory for each thread.
-    Ensures that the directory name is unique to avoid conflicts.
-    """
-    while True:
-        # Generate a truly unique temporary directory using random suffix
-        unique_suffix = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-        temp_dir = os.path.join(tempfile.gettempdir(), f"chrome_user_data_{unique_suffix}")
-        
-        # Ensure the directory doesn't already exist
-        if not os.path.exists(temp_dir):
-            break  # We found a unique directory, break the loop
-
-    # Now create the directory
-    os.makedirs(temp_dir)
-    # Copy the contents of the source directory to the unique directory
-    try:
-        shutil.copytree(source_dir, temp_dir, dirs_exist_ok=True)
-    except Exception as e:
-        logger.error(f"Error copying directory: {e}")
-        shutil.rmtree(temp_dir)  # Cleanup in case of failure
-        raise e
-
-    return temp_dir
 
 def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger, failed_knives_name: str) -> None:
     failed_knives = []
@@ -538,4 +507,4 @@ def handle_shutdown(signal, frame, logger: CustomLogger):
     sys.exit(0)
 
 # Register the signal handler for SIGINT (Ctrl+C)
-signal.signal(signal.SIGINT, handle_shutdown)
+#signal.signal(signal.SIGINT, handle_shutdown)
