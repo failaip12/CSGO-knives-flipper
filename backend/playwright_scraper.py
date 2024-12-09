@@ -12,8 +12,8 @@ from typing import List, Optional, Tuple
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page
 from tqdm import tqdm
-from common import copy_user_data_dir, log_failed_knives
-from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_amount_sold, update_selling_frequency
+from common import copy_user_data_dir, load_failed_knives_csv, log_failed_knives
+from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_all
 from selenium_scraper import ExtractedData
 from mysql.connector.connection import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
@@ -372,11 +372,11 @@ def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: O
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
     # Get knife names from the database
-    knife_names = get_knife_list_from_db(sql_cursor, date)
+    #knife_names = get_knife_list_from_db(sql_cursor, date)
+    knife_names = load_failed_knives_csv('fk')
     # Update database with additional calculations
     process_knives(logger, knife_names, failed_knives_name, wait_time)
-    update_amount_sold(sql_cursor)
-    update_selling_frequency(sql_cursor)
+    update_all(sql_cursor)
 
     # Close database resources
     sql_cursor.close()
@@ -405,7 +405,7 @@ def steam_login():
         input("Press Enter after completing the login process...")
         browser.close()
 if __name__ == "__main__":
-    logger = CustomLogger()
+    logger = CustomLogger('knives_playwright.log')
     #steam_login()    
     #sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 

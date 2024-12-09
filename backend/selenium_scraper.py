@@ -26,7 +26,7 @@ from mysql.connector.cursor import MySQLCursor
 from Knife import Knife
 from CustomLogger import CustomLogger
 from common import copy_user_data_dir, log_failed_knives
-from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_amount_sold, update_selling_frequency
+from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_all
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
 # https://steamcommunity.com/market/search?q=&category_730_ItemSet%5B%5D=any&category_730_ProPlayer%5B%5D=any&category_730_StickerCapsule%5B%5D=any&category_730_TournamentTeam%5B%5D=any&category_730_Weapon%5B%5D=any&category_730_Type%5B%5D=tag_CSGO_Type_Knife&appid=730#p1_name_asc
@@ -470,8 +470,7 @@ def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: O
         process_knives(logger, knife_names, failed_knives_name, wait_time)
 
         # Update database with additional calculations
-        update_amount_sold(sql_cursor)
-        update_selling_frequency(sql_cursor)
+        update_all(sql_cursor)
 
         # Close database resources
         sql_cursor.close()

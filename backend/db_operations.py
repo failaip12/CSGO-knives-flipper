@@ -130,6 +130,11 @@ def connect_to_db_threaded(host: str, database: str, port: int, user: str, passw
     # Create a new connection per thread
     return connect_to_db(host=host, database=database, port=port, user=user, password=password, logger=logger)
 
+def update_all(cursor: MySQLCursor) -> None:
+    update_amount_sold(cursor)
+    update_selling_frequency(cursor)
+    update_amount_sold_last_year(cursor)
+
 def update_amount_sold(cursor: MySQLCursor) -> None:
     update_query = '''
     UPDATE `knives`.`Knives` k
@@ -154,5 +159,26 @@ def update_selling_frequency(cursor: MySQLCursor) -> None:
         GROUP BY sh.`knife_id`
     ) sf ON k.`knife_id` = sf.`knife_id`
     SET k.`selling_frequency` = sf.`frequency`;
+    '''
+    cursor.execute(update_query)
+def update_amount_sold_last_year(cursor: MySQLCursor) -> None:
+    update_query = '''
+    WITH LastYearSales AS (
+        SELECT 
+            sh.knife_id,
+            SUM(sh.quantity) AS total_quantity_sold
+        FROM 
+            SellHistory sh
+        JOIN 
+            SellTimes st ON sh.sell_time_id = st.sell_time_id
+        WHERE 
+            st.sell_time >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+        GROUP BY 
+            sh.knife_id
+    )
+
+    UPDATE Knives k
+    LEFT JOIN LastYearSales lys ON k.knife_id = lys.knife_id
+    SET k.amount_sold_last_year = COALESCE(lys.total_quantity_sold, 0);
     '''
     cursor.execute(update_query)
