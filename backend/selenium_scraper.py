@@ -156,12 +156,15 @@ def extract_knife_data_with_retry(driver: WebDriver, url: str, wait_time: int) -
     data = None
     for _ in range(retries):
         data = extract_knife_data(driver, url, wait_time)
-        if(isinstance(data.get('message'), str)):
-            if "many" not in data.get('message'):
+        message = data.get('message')
+        if(isinstance(message, str)):
+            if "many" not in message:
                 return data
         else:
-            if not data.get('message') or "error" not in data.get('message')[0].text or "too many requests" not in data.get('message')[0].text:
+            if not message or "error" not in message[0].text or "too many requests" not in message[0].text:
                 return data
+        if message and message[0] and message[0].text and "no listings" in message[0].text:
+            return data
         time.sleep(10)
         #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
     return data
