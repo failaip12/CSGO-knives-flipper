@@ -8,7 +8,7 @@ if __name__ == "__main__":
     
     #names = load_failed_knives_csv("fk")
     #process_knives(names, "new_fk")
-    update_all_knife_data('failed_knives', logger)
+    #update_all_knife_data('failed_knives', logger)
     #connection, cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
     #knife_name = "★ StatTrak™ Huntsman Knife | Case Hardened (Field-Tested)"
     #driver, user_data_dir = initialize_driver(False, logger)

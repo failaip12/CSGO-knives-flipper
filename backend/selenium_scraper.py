@@ -30,6 +30,7 @@ from mysql.connector.cursor import MySQLCursor
 
 from Knife import Knife
 from CustomLogger import CustomLogger
+from common import log_failed_knives
 from db_operations import connect_to_db, connect_to_db_threaded, get_and_save_historical_pricing_helper, get_knife_from_db, get_knife_list_from_db, save_knives_to_db, update_amount_sold, update_selling_frequency
 # https://steamcommunity.com/market/listings/730/%E2%98%85%20Survival%20Knife%20%7C%20Crimson%20Web%20%28Factory%20New%29
 # WEB SCRAPE IT
@@ -102,7 +103,7 @@ def get_knife_list(driver: WebDriver, wait_time: int) -> Set[str]:
 ExtractedData = Dict[str, List[Any]]
 
 def extract_knife_data(driver: WebDriver, url: str, wait_time: int) -> ExtractedData:
-    driver.execute_script("location.reload(true);")
+    driver.execute_script("location.reload(true);") #TODO: This may be unnecessary
     page = parse_page(url, driver)
 
     driver.execute_script("window.scrollTo(0, 1000);")
@@ -187,7 +188,7 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
                 """
             )
         except Exception as e:
-            logger.error("Could not get historical pricing {name}" + str(e))
+            logger.error(f"Could not get historical pricing {name}" + str(e))
             current_attempt += 1
             time.sleep(current_attempt)
             continue
@@ -233,7 +234,6 @@ def get_and_save_historical_pricing(driver: WebDriver, cursor: MySQLCursor, conn
         price, parsed_date = get_and_save_historical_pricing_helper(data, date_format, cursor, connection, knife_id)
     return price, parsed_date
 
-#TODO: Add failed knives to a csv or something
 def get_knife_info(name: str, driver: WebDriver, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     url = f"https://steamcommunity.com/market/listings/730/{name}"
     #logger.info(f"Processing knife {name}")
@@ -419,36 +419,6 @@ def copy_user_data_dir(source_dir: str, logger: CustomLogger) -> str:
         raise e
 
     return temp_dir
-
-def log_failed_knives(failed_knives: List[str], file_name) -> None:
-    """Log the names of knives that failed to fetch into a CSV file."""
-    with open(file_name + "-" + datetime.now().strftime('%Y-%m-%d') + ".csv", mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        for knife in failed_knives:
-            writer.writerow([knife])  # Log the failed knife name or other relevant info
-
-def load_failed_knives_csv(file_name: str) -> List[Tuple[str]]:
-    """
-    Load a CSV file into a set.
-
-    Args:
-        file_path (str): Path to the CSV file.
-
-    Returns:
-        set: A set containing rows of the CSV file as tuples.
-    """
-    data_set = set()
-    csv_name = file_name + ".csv"
-    try:
-        with open(csv_name, mode='r', encoding='utf-8') as file:
-            csv_reader = csv.reader(file)
-            for row in csv_reader:
-                data_set.add((row[0],))  # Convert each row to a tuple and add to the set
-    except FileNotFoundError:
-        print(f"Error: File '{csv_name}' not found.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    return list(data_set)
 
 def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, progress_bar: tqdm, logger: CustomLogger, failed_knives_name: str) -> None:
     failed_knives = []
