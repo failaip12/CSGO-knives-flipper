@@ -1,0 +1,158 @@
+from datetime import datetime
+from decimal import Decimal
+from typing import List, Optional, Tuple
+
+import mysql.connector
+from mysql.connector import Error
+from mysql.connector.connection import MySQLConnection
+from mysql.connector.cursor import MySQLCursor
+from tqdm import tqdm
+
+from Knife import Knife
+from CustomLogger import CustomLogger
+
+def add_new_knives_to_db(names: List[str], cursor: MySQLCursor, connection: MySQLConnection) -> None:
+    for name in tqdm(names):
+        cursor.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
+        if cursor.fetchone() is None:
+            cursor.execute("INSERT INTO knives (knife_name) VALUES (%s)", (name,))
+            connection.commit()
+
+#TODO: Optimize this b
+def get_and_save_historical_pricing_helper(data: List[List], date_format: str, cursor: MySQLCursor, connection: MySQLConnection, knife_id: int) -> Tuple[Optional[float], Optional[datetime]]:
+    price = None
+    parsed_date = None
+    #TODO: Batch insert
+    for result in data:
+        date_string = result[0][:-4]
+        parsed_date = datetime.strptime(date_string, date_format)
+        price = result[1]
+        sold_count = result[2]
+        cursor.execute("SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
+        existing_date = cursor.fetchone()
+        if not existing_date:
+            cursor.execute("INSERT IGNORE INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,))
+            connection.commit()
+            date_id = cursor.lastrowid
+        else:
+            value = existing_date[0]
+            if isinstance(value, (int, float, Decimal)):
+                date_id = int(value)
+            elif isinstance(value, str) and value.isdigit():
+                date_id = int(value)
+            else:
+                date_id = None
+        #TODO: IGNORE should in theory be unnecessary
+        if(date_id is not None):
+            cursor.execute("INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)", (knife_id, date_id, price, sold_count))
+            connection.commit()
+    return price, parsed_date
+
+def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQLConnection) -> None:
+    if not knives:
+        return
+    
+    # Prepare the base update query
+    base_query = """
+        UPDATE knives SET
+            current_min_price_with_fee = %s,
+            current_min_price_without_fee = %s,
+            last_min_price_with_fee = %s,
+            last_min_price_without_fee = %s,
+            buy_order_price = %s,
+            last_updated = %s,
+            last_sold = %s
+        WHERE knife_name = %s
+    """
+    
+    # Create a list of tuples with values for each knife
+    values = []
+    for knife in knives:
+        # Populate the fields and handle optional fields with None
+        values.append((
+            knife.current_min_price_with_fee,
+            knife.current_min_price_without_fee,
+            knife.last_min_price_with_fee,
+            knife.last_min_price_without_fee,
+            knife.buy_order_price,
+            knife.last_updated,
+            knife.last_sold,
+            knife.knife_name  # WHERE clause value
+        ))
+    
+    # Execute the batch update
+    cursor.executemany(base_query, values)
+    connection.commit()
+
+def get_knife_list_from_db(cursor: MySQLCursor, date: Optional[str] = None) -> List[Tuple[str]]:
+    if(date is None):
+        select_query = "SELECT knife_name FROM knives ORDER BY last_updated ASC"
+    else:
+        select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date} ORDER BY last_updated ASC"
+    cursor.execute(select_query)
+    knife_list = cursor.fetchall()
+    return knife_list
+
+def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
+    cursor.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
+    row = cursor.fetchone()  # Fetch a single row
+    if row:
+        # Create a Knife object from the fetched data
+        knife = Knife(
+            knife_id=row[0],
+            knife_name=row[1],
+            current_min_price_with_fee=row[2],
+            current_min_price_without_fee=row[3],
+            last_min_price_with_fee=row[4],
+            last_min_price_without_fee=row[5],
+            buy_order_price=row[6],
+            last_sold=row[9] if len(row) > 9 else None  # Last sold is optional
+        )
+        return knife
+    else:
+        return None  # If no knife is found, return None
+
+def connect_to_db(host: str, database: str, port: int, user: str, password: str, logger: CustomLogger) -> Tuple[MySQLConnection, MySQLCursor]:
+    try:
+        sql_connection = mysql.connector.connect(host=host, database=database, port=port, user=user, password=password)
+        if sql_connection.is_connected():
+            sql_cursor = sql_connection.cursor()
+        else:
+            logger.critical("SQL connection error, likely invalid connection parameters")
+            exit(1)
+
+    except Error as e:
+        logger.critical("SQL connection error " + str(e))
+        exit(1)
+    return sql_connection, sql_cursor
+
+def connect_to_db_threaded(host: str, database: str, port: int, user: str, password: str, logger: CustomLogger) -> Tuple[MySQLConnection, MySQLCursor]:
+    # Create a new connection per thread
+    return connect_to_db(host=host, database=database, port=port, user=user, password=password, logger=logger)
+
+def update_amount_sold(cursor: MySQLCursor) -> None:
+    update_query = '''
+    UPDATE `knives`.`Knives` k
+    JOIN (
+        SELECT `knife_id`, COUNT(*) AS `total_sold`
+        FROM `knives`.`SellHistory`
+        GROUP BY `knife_id`
+    ) sh ON k.`knife_id` = sh.`knife_id`
+    SET k.`amount_sold` = sh.`total_sold`;
+    '''
+    cursor.execute(update_query)
+
+
+def update_selling_frequency(cursor: MySQLCursor) -> None:
+    update_query = '''
+    UPDATE `knives`.`Knives` k
+    JOIN (
+        SELECT sh.`knife_id`, 
+            COUNT(*) / TIMESTAMPDIFF(MONTH, MIN(st.`sell_time`), NOW()) AS `frequency`
+        FROM `knives`.`SellHistory` sh
+        JOIN `knives`.`SellTimes` st ON sh.`sell_time_id` = st.`sell_time_id`
+        GROUP BY sh.`knife_id`
+    ) sf ON k.`knife_id` = sf.`knife_id`
+    SET k.`selling_frequency` = sf.`frequency`;
+    '''
+    cursor.execute(update_query)
