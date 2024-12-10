@@ -10,10 +10,12 @@ from steampy.client import SteamClient
 from steampy.models import GameOptions, Currency
 
 from Knife import Knife
-from main import safe_get_knife_info, save_knives_to_db, connect_to_db, initialize_driver
 from CustomLogger import CustomLogger, LogLevel
 from selenium.webdriver.chrome.webdriver import WebDriver
 from mysql.connector.connection import MySQLConnection
+
+from selenium_scraper import initialize_driver, safe_get_knife_info
+from db_operations import connect_to_db, save_knives_to_db
 
 def exit_gracefully(driver: WebDriver, connection: MySQLConnection, user_data_dir: str, exit_code: int) -> None:
     driver.quit()
