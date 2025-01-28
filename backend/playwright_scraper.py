@@ -399,24 +399,11 @@ def steam_login():
         original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
         browser = p.chromium.launch_persistent_context(user_data_dir=original_user_data_dir, headless=False)
         page = browser.new_page()
-        page.goto('https://steamcommunity.com')
+        page.goto('https://steamcommunity.com/login/home')
         browser.storage_state(path="storage.json")
-        print("Please log in manually. Close the browser when done.")
         input("Press Enter after completing the login process...")
         browser.close()
 if __name__ == "__main__":
     logger = CustomLogger('knives_playwright.log')
-    #steam_login()    
-    #sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
-
-    # Get knife names from the database
-    #knife_names = get_knife_list_from_db(sql_cursor)
-    #fetch_all_knives_for_thread(knife_names, 6, None, logger, 'failed_knives')
-    #with sync_playwright() as p:
-    #    browser = p.chromium.launch(headless=False)
-    #    context = browser.new_context(storage_state="storage.json")
-    #    page = browser.new_page()
-    #    page.goto('https://steamcommunity.com')
-    #    input("Press Enter after completing the login process...")
-    #    browser.close()
+    #steam_login()
     update_all_knife_data('failed_knives', logger)
