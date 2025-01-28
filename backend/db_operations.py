@@ -118,11 +118,11 @@ def connect_to_db(host: str, database: str, port: int, user: str, password: str,
         if sql_connection.is_connected():
             sql_cursor = sql_connection.cursor()
         else:
-            logger.critical("SQL connection error, likely invalid connection parameters")
+            logger.fatal("SQL connection error, likely invalid connection parameters")
             exit(1)
 
     except Error as e:
-        logger.critical("SQL connection error " + str(e))
+        logger.fatal("SQL connection error " + str(e))
         exit(1)
     return sql_connection, sql_cursor
 

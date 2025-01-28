@@ -82,7 +82,7 @@ def extract_knife_data_with_retry(page: Page, url: str, wait_time: int) -> Optio
         else:
             if not message or "error" not in message[0].text or "too many requests" not in message[0].text:
                 return data
-        if message and message[0] and message[0].text and "no listings" in message[0].text:
+        if message and message[0] and not isinstance(message[0], str) and message[0].text and "no listings" in message[0].text:
             return data
         time.sleep(10)
         #driver.implicitly_wait(30)  # Wait for 30 seconds before retrying
@@ -344,7 +344,7 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
 def process_knives(logger: CustomLogger, knife_names: List[Tuple[str]], failed_knives_name: str, wait_time: int = 6):
     
     # Define ThreadPool parameters
-    thread_count = 8
+    thread_count = 6
     chunk_size = len(knife_names) // thread_count
     knife_name_chunks = [knife_names[i:i + chunk_size] for i in range(0, len(knife_names), chunk_size)]
 
@@ -372,8 +372,8 @@ def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: O
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
     # Get knife names from the database
-    #knife_names = get_knife_list_from_db(sql_cursor, date)
-    knife_names = load_failed_knives_csv('fk')
+    knife_names = get_knife_list_from_db(sql_cursor, date)
+    #knife_names = load_failed_knives_csv('fk')
     # Update database with additional calculations
     process_knives(logger, knife_names, failed_knives_name, wait_time)
     update_all(sql_cursor)

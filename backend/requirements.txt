@@ -1,4 +1,4 @@
-dotenv
+python-dotenv
 steampy
 selenium
 mysql-connector-python
