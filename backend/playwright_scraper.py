@@ -331,11 +331,11 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
                 save_knives_to_db(batch, cursor, connection)
                 batch.clear()
             if len(failed_knives) == fail_batch_size:
-                log_failed_knives(failed_knives, failed_knives_name)  # Log all failed knives for this batch
+                log_failed_knives(failed_knives, failed_knives_name, logger)  # Log all failed knives for this batch
                 failed_knives.clear()  # Clear the list for the next batch
     
     if failed_knives:
-        log_failed_knives(failed_knives, failed_knives_name)
+        log_failed_knives(failed_knives, failed_knives_name, logger)
     browser.close()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
     connection.close()
@@ -372,12 +372,19 @@ def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: O
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
     # Get knife names from the database
-    knife_names = get_knife_list_from_db(sql_cursor, date)
-    #knife_names = load_failed_knives_csv('fk')
+    #knife_names = get_knife_list_from_db(sql_cursor, date)
+    knife_names = load_failed_knives_csv('fk.csv', logger)
     # Update database with additional calculations
     process_knives(logger, knife_names, failed_knives_name, wait_time)
     update_all(sql_cursor)
-
+    failed = load_failed_knives_csv(failed_knives_name, logger)
+    os.remove(failed_knives_name)
+    retries = 0
+    while(retries < MAX_RETRY_COUNT and len(failed) > MAX_FAILED_KNIVES):
+        process_knives(logger, failed, failed_knives_name, wait_time)
+        update_all(sql_cursor)
+        failed = load_failed_knives_csv(failed_knives_name, logger)
+        retries+=1
     # Close database resources
     sql_cursor.close()
     sql_connection.close()
@@ -405,5 +412,7 @@ def steam_login():
         browser.close()
 if __name__ == "__main__":
     logger = CustomLogger('knives_playwright.log')
+    MAX_FAILED_KNIVES = 10
+    MAX_RETRY_COUNT = 5
     #steam_login()
-    update_all_knife_data('failed_knives', logger)
+    update_all_knife_data('failed_knives.csv', logger)

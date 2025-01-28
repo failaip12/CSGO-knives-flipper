@@ -10,14 +10,20 @@ from typing import List, Tuple
 from CustomLogger import CustomLogger
 
 
-def log_failed_knives(failed_knives: List[str], file_name) -> None:
+def log_failed_knives(failed_knives: List[str], file_name, logger: CustomLogger) -> None:    
     """Log the names of knives that failed to fetch into a CSV file."""
-    with open(file_name + "-" + datetime.now().strftime('%Y-%m-%d') + ".csv", mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        for knife in failed_knives:
-            writer.writerow([knife])  # Log the failed knife name or other relevant info
+    try:
+        with open(file_name, mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            for knife in failed_knives:
+                writer.writerow([knife])  # Log the failed knife name or other relevant info
+    except FileNotFoundError:
+        logger.error(f"File '{file_name}' not found.")
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
 
-def load_failed_knives_csv(file_name: str) -> List[Tuple[str]]:
+
+def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> List[Tuple[str]]:
     """
     Load a CSV file into a set.
 
@@ -28,16 +34,15 @@ def load_failed_knives_csv(file_name: str) -> List[Tuple[str]]:
         set: A set containing rows of the CSV file as tuples.
     """
     data_set = set()
-    csv_name = file_name + ".csv"
     try:
-        with open(csv_name, mode='r', encoding='utf-8') as file:
+        with open(file_name, mode='r', encoding='utf-8') as file:
             csv_reader = csv.reader(file)
             for row in csv_reader:
                 data_set.add((row[0],))  # Convert each row to a tuple and add to the set
     except FileNotFoundError:
-        print(f"Error: File '{csv_name}' not found.")
+        logger.error(f"File '{file_name}' not found.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
     return list(data_set)
 
 def copy_user_data_dir(source_dir: str, logger: CustomLogger, dir_name: str) -> str:
