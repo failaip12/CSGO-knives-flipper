@@ -32,6 +32,7 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
         page.wait_for_selector('//div[@id="market_commodity_buyrequests"]', state="visible", timeout=wait_time * 1000)
         page.wait_for_selector('//span[@class="market_commodity_orders_header_promote"]', state="visible", timeout=wait_time * 1000)
         page.wait_for_selector('//span[@class="market_listing_price market_listing_price_with_fee"]', state="visible", timeout=wait_time * 1000)
+        page.wait_for_selector('//div[@class="market_listing_largeimage"]', state="visible", timeout=wait_time * 1000)
         page.wait_for_selector('//span[@class="market_listing_price market_listing_price_without_fee"]', state="attached", timeout=wait_time * 1000)
     except:
         pass
@@ -44,6 +45,8 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
         buy_orders_text = [element.inner_text() for element in buy_orders_elements]
         current_min_price_with_fee_elements = page.query_selector_all('.market_listing_price.market_listing_price_with_fee')
         current_min_price_with_fee_text = [element.inner_text() for element in current_min_price_with_fee_elements]
+        
+        img_src = page.locator(".market_listing_largeimage img").get_attribute("src")
         #current_min_price_without_fee_text = [element.text for element in driver.find_elements(By.CLASS_NAME, "market_listing_price.market_listing_price_without_fee")]
     except:
         pass
@@ -65,7 +68,8 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
         'buy_orders': buy_orders_text,
         'current_min_price_with_fee': current_min_price_with_fee_text,
         #'current_min_price_without_fee': current_min_price_without_fee_text,
-        'message': message
+        'message': message,
+        'knife_image': img_src
     }
     return data
 
@@ -215,7 +219,7 @@ def get_knife_info(name: str, page: Page, cursor: MySQLCursor, connection: MySQL
     buy_order_price = None
     if(buy_orders):
         buy_order_price = float(data.get('buy_orders')[1].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip())
-
+    knife_image = data.get('knife_image')
     # Extract knife_id using regular expression
     knife_id = None
     desired_line = None
@@ -270,6 +274,7 @@ def get_knife_info(name: str, page: Page, cursor: MySQLCursor, connection: MySQL
         last_min_price_with_fee,
         last_min_price_without_fee,
         buy_order_price,
+        knife_image,
         last_sold
     )
     return knife
@@ -277,10 +282,10 @@ def get_knife_info(name: str, page: Page, cursor: MySQLCursor, connection: MySQL
 def safe_get_knife_info(name: Tuple[str], page: Page, cursor: MySQLCursor, connection: MySQLConnection, wait_time: int, logger: CustomLogger) -> Optional[Knife]:
     """A wrapper that catches and logs errors for get_knife_info."""
     try:
-        knife_info = get_knife_info(name[0], page, cursor, connection, wait_time, logger)
+        knife_info = get_knife_info(name, page, cursor, connection, wait_time, logger)
         return knife_info
     except Exception as e:
-        logger.error(f"Error processing knife {name[0]}: {e}")
+        logger.error(f"Error processing knife {name}: {e}")
         return None  # Return None or handle as needed
 def initialize_directory(logger: CustomLogger) -> str:
     project_root = Path(__file__).parent  # This will get the directory where this script is located
@@ -300,7 +305,7 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
     batch = list()
     batch_size = 15
     # Store thread-specific resources in thread-local storage
-
+    
     with sync_playwright() as p:
         connection, cursor = connect_to_db_threaded(host='localhost', database='knives', port=3306, user='root', password='', logger=logger)
         # Initialize the driver once per thread
@@ -314,17 +319,15 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
         page = browser.new_page()
 
         thread_resources.page = page
-
         for knife_name in knife_names:
             if shutdown_event.is_set():
                 logger.info("Shutdown signal received. Exiting thread...")
                 break
-
             knife_info = safe_get_knife_info(knife_name, page, cursor, connection, wait_time, logger)
             if knife_info:
                 batch.append(knife_info)
             else:
-                failed_knives.append(knife_name[0])
+                failed_knives.append(knife_name)
                 
             progress_bar.update(1)
             if(len(batch) == batch_size):
@@ -372,13 +375,14 @@ def update_all_knife_data(failed_knives_name: str, logger: CustomLogger, date: O
     sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
 
     # Get knife names from the database
-    #knife_names = get_knife_list_from_db(sql_cursor, date)
-    knife_names = load_failed_knives_csv('fk.csv', logger)
+    knife_names = get_knife_list_from_db(sql_cursor, date)
+    #knife_names = load_failed_knives_csv('fk.csv', logger)
     # Update database with additional calculations
     process_knives(logger, knife_names, failed_knives_name, wait_time)
     update_all(sql_cursor)
     failed = load_failed_knives_csv(failed_knives_name, logger)
-    os.remove(failed_knives_name)
+    if(len(failed) > 0):
+        os.remove(failed_knives_name)
     retries = 0
     while(retries < MAX_RETRY_COUNT and len(failed) > MAX_FAILED_KNIVES):
         process_knives(logger, failed, failed_knives_name, wait_time)
@@ -415,4 +419,12 @@ if __name__ == "__main__":
     MAX_FAILED_KNIVES = 10
     MAX_RETRY_COUNT = 5
     #steam_login()
+    
+    #with sync_playwright() as p:
+    #    project_root = Path(__file__).parent  # This will get the directory where this script is located
+    #    original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
+    #    browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
+    #    page = browser.new_page()
+    #    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    #    save_knives_to_db([safe_get_knife_info("★ StatTrak™ Bayonet | Autotronic (Battle-Scarred)", page, sql_cursor, sql_connection, 6, logger)], sql_cursor, sql_connection)
     update_all_knife_data('failed_knives.csv', logger)

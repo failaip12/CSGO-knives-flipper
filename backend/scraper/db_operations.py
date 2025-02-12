@@ -61,7 +61,8 @@ def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQ
             last_min_price_without_fee = %s,
             buy_order_price = %s,
             last_updated = %s,
-            last_sold = %s
+            last_sold = %s,
+            knife_image = %s
         WHERE knife_name = %s
     """
     
@@ -77,6 +78,7 @@ def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQ
             knife.buy_order_price,
             knife.last_updated,
             knife.last_sold,
+            knife.knife_image,
             knife.knife_name  # WHERE clause value
         ))
     
@@ -84,13 +86,13 @@ def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQ
     cursor.executemany(base_query, values)
     connection.commit()
 
-def get_knife_list_from_db(cursor: MySQLCursor, date: Optional[str] = None) -> List[Tuple[str]]:
+def get_knife_list_from_db(cursor: MySQLCursor, date: Optional[str] = None) -> List[str]:
     if(date is None):
         select_query = "SELECT knife_name FROM knives ORDER BY last_updated ASC"
     else:
         select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date} ORDER BY last_updated ASC"
     cursor.execute(select_query)
-    knife_list = cursor.fetchall()
+    knife_list = [name[0] for name in cursor.fetchall()]
     return knife_list
 
 def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
