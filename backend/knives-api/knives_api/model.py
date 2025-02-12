@@ -15,5 +15,6 @@ class Knives(SQLModel, table=True):
     last_updated: Optional[datetime] = Field(default=None)
     last_sold: Optional[datetime] = Field(default=None)
     amount_sold: int = Field(default=0)
+    amount_sold_last_year: int = Field(default=0)
     selling_frequency: Decimal = Field(default=Decimal("0.00"), sa_column=Column(DECIMAL(10, 2)))
     knife_image: str = Field(max_length=150)

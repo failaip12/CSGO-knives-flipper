@@ -38,7 +38,7 @@ def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> List[Tuple[s
         with open(file_name, mode='r', encoding='utf-8') as file:
             csv_reader = csv.reader(file)
             for row in csv_reader:
-                data_set.add((row[0],))  # Convert each row to a tuple and add to the set
+                data_set.add(row[0])  # Convert each row to a tuple and add to the set
     except FileNotFoundError:
         logger.error(f"File '{file_name}' not found.")
     except Exception as e:
