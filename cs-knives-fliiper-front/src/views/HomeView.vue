@@ -31,10 +31,6 @@ onMounted(async () => {
   } catch (error) {
     console.error('Fetch error:', error)
   }
-
-  knives.value.forEach((knife) => {
-    console.log(knife)
-  })
 })
 
 const filteredKnives = computed(() => {

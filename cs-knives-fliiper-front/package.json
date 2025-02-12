@@ -10,7 +10,10 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+	  "serve": "vite preview --port 5000",
+	  "build-watch": "run-p type-check \"build-only-watch\"",
+    "build-only-watch": "vite build --watch --emptyOutDir=false"
   },
   "dependencies": {
     "vue": "^3.5.13",
