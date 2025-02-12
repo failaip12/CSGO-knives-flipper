@@ -162,8 +162,8 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
               </td>
               <td>{{ knife.amount_sold ?? 'N/A' }}</td>
               <td class="price">{{ knife.amount_sold_last_year }}</td>
-              <td class="price">${{ knife.buy_order_price }}</td>
-              <td class="price">${{ knife.last_min_price_without_fee - knife.buy_order_price }}</td>
+              <td class="price">€{{ knife.buy_order_price }}</td>
+              <td class="price">€{{ knife.last_min_price_without_fee - knife.buy_order_price }}</td>
             </tr>
           </tbody>
         </table>
