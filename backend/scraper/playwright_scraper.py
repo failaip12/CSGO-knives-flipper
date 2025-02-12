@@ -425,6 +425,7 @@ if __name__ == "__main__":
     #    original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
     #    browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
     #    page = browser.new_page()
-    #    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
     #    save_knives_to_db([safe_get_knife_info("★ StatTrak™ Bayonet | Autotronic (Battle-Scarred)", page, sql_cursor, sql_connection, 6, logger)], sql_cursor, sql_connection)
-    update_all_knife_data('failed_knives.csv', logger)
+    #update_all_knife_data('failed_knives.csv', logger)
+    update_all(sql_cursor)

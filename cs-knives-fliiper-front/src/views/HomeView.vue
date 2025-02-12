@@ -13,6 +13,8 @@ interface Knife {
   last_sold: string
   amount_sold: number | null
   selling_frequency: number | null
+  amount_sold_last_year: number
+  knife_image: object
 }
 
 const knives = ref<Knife[]>([])
@@ -20,6 +22,8 @@ const page = ref(1)
 const perPage = ref(50)
 const maxBuyOrderPrice = ref<number | null>(null)
 const minProfit = ref<number | null>(null)
+const minSold = ref<number | null>(null)
+
 onMounted(async () => {
   try {
     const response = await fetch('http://localhost:8000/knives')
@@ -46,7 +50,9 @@ const filteredKnives = computed(() => {
       return profit >= minProfit.value!
     })
   }
-
+  if (minSold.value !== null) {
+    filtered = filtered.filter((knife) => knife.amount_sold_last_year >= minSold.value!)
+  }
   filtered.sort((a, b) => {
     const profitA = a.last_min_price_without_fee - a.buy_order_price
     const profitB = b.last_min_price_without_fee - b.buy_order_price
@@ -105,6 +111,16 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
           class="form-input"
         />
       </div>
+      <div class="form-group">
+        <label for="minAmountSold">Min Amount Sold Last Year:</label>
+        <input
+          type="number"
+          id="minSold"
+          v-model.number="minSold"
+          placeholder="Enter min sold"
+          class="form-input"
+        />
+      </div>
       <div class="form-buttons">
         <button
           type="reset"
@@ -131,7 +147,7 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
               <th>Knife ID</th>
               <th>Knife Name</th>
               <th>Knife Amount Sold</th>
-              <th>Status</th>
+              <th>AmountSoldLastYear</th>
               <th>BuyOrderPrice</th>
               <th>Profit</th>
             </tr>
@@ -145,9 +161,7 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
                 }}</a>
               </td>
               <td>{{ knife.amount_sold ?? 'N/A' }}</td>
-              <td>
-                <span class="status-badge low-stock">Low Stock</span>
-              </td>
+              <td class="price">{{ knife.amount_sold_last_year }}</td>
               <td class="price">${{ knife.buy_order_price }}</td>
               <td class="price">${{ knife.last_min_price_without_fee - knife.buy_order_price }}</td>
             </tr>
