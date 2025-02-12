@@ -4,3 +4,5 @@ selenium
 mysql-connector-python
 selenium-wire-2
 tqdm
+beautifulsoup4
+playwright
