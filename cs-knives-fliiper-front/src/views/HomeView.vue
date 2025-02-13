@@ -35,7 +35,7 @@ onMounted(async () => {
 })
 
 const filteredKnives = computed(() => {
-  let filtered = knives.value
+  let filtered = knives.value.filter((knife) => knife.buy_order_price != null)
 
   if (maxBuyOrderPrice.value !== null) {
     filtered = filtered.filter((knife) => knife.buy_order_price <= maxBuyOrderPrice.value!)
