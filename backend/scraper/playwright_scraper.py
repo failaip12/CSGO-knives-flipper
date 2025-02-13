@@ -39,7 +39,7 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
     buy_orders_text = []
     current_min_price_with_fee_text = []
     #current_min_price_without_fee_text = None
-
+    img_src = None
     try:
         buy_orders_elements = page.query_selector_all('.market_commodity_orders_header_promote')
         buy_orders_text = [element.inner_text() for element in buy_orders_elements]
@@ -425,7 +425,7 @@ if __name__ == "__main__":
     #    original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
     #    browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
     #    page = browser.new_page()
-    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    #    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
     #    save_knives_to_db([safe_get_knife_info("★ StatTrak™ Bayonet | Autotronic (Battle-Scarred)", page, sql_cursor, sql_connection, 6, logger)], sql_cursor, sql_connection)
-    #update_all_knife_data('failed_knives.csv', logger)
-    update_all(sql_cursor)
+    update_all_knife_data('failed_knives.csv', logger)
+    #update_all(sql_cursor)

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `knives`.`Knives` (
   `amount_sold` INT UNSIGNED NOT NULL DEFAULT 0,
   `selling_frequency` DECIMAL(10,2) NOT NULL DEFAULT 0,
   `amount_sold_last_year` INT UNSIGNED NOT NULL DEFAULT 0,
-  `knife_image` VARCHAR(150) NULL,
+  `knife_image` VARCHAR(400) NULL,
   PRIMARY KEY (`knife_id`),
   UNIQUE INDEX `idKnives_UNIQUE` (`knife_id` ASC) VISIBLE,
   UNIQUE INDEX `min_price_with_fee_copy1_UNIQUE` (`knife_name` ASC) VISIBLE)
