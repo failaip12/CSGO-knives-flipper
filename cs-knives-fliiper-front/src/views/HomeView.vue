@@ -167,7 +167,7 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
         <div class="pagination">
           <div>
             Showing {{ (page - 1) * perPage + 1 }} to
-            {{ Math.min(page * perPage, knives.length) }} of {{ knives.length }} Results
+            {{ Math.min(page * perPage, knives.length) }} of {{ filteredKnives.length }} Results
           </div>
           <div class="pagination-controls">
             <button @click="prevPage" :disabled="page === 1">Prev</button>
