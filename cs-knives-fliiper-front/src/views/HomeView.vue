@@ -31,7 +31,6 @@ onMounted(async () => {
   } catch (error) {
     console.error('Fetch error:', error)
   }
-  knives.value.forEach((element) => console.log(element.knife_image))
 })
 
 const filteredKnives = computed(() => {
