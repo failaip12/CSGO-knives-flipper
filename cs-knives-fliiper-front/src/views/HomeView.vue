@@ -14,7 +14,7 @@ interface Knife {
   amount_sold: number | null
   selling_frequency: number | null
   amount_sold_last_year: number
-  knife_image: object
+  knife_image: string
 }
 
 const knives = ref<Knife[]>([])
@@ -31,6 +31,7 @@ onMounted(async () => {
   } catch (error) {
     console.error('Fetch error:', error)
   }
+  knives.value.forEach((element) => console.log(element.knife_image))
 })
 
 const filteredKnives = computed(() => {
@@ -140,7 +141,7 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
         <table class="product-table">
           <thead>
             <tr>
-              <th>Knife ID</th>
+              <th>IMG</th>
               <th>Knife Name</th>
               <th>Knife Amount Sold</th>
               <th>AmountSoldLastYear</th>
@@ -150,7 +151,7 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
           </thead>
           <tbody>
             <tr v-for="knife in displayedKnives" :key="knife.knife_id">
-              <td>{{ knife.knife_id }}</td>
+              <td><img style="width: 5rem" :src="knife.knife_image" loading="lazy" /></td>
               <td>
                 <a :href="'https://steamcommunity.com/market/listings/730/' + knife.knife_name">{{
                   knife.knife_name
