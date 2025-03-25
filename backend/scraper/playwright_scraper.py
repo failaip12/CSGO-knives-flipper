@@ -317,7 +317,7 @@ def fetch_all_knives_for_thread(knife_names: List[Tuple[str]], wait_time: int, p
 
         browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
         page = browser.new_page()
-
+        page.route("**/*", route_intercept)
         thread_resources.page = page
         for knife_name in knife_names:
             if shutdown_event.is_set():
@@ -404,6 +404,26 @@ def graceful_shutdown(signal_received, frame, sql_cursor, sql_connection):
     os._exit(0)
 shutdown_event = threading.Event()
 thread_resources = threading.local()
+
+def route_intercept(route):
+    if route.request.resource_type == "image":
+        #print(f"Blocking the image request to: {route.request.url}")
+        return route.abort()
+    if route.request.resource_type == "stylesheet":
+        #print(f"Blocking the stylesheet request to: {route.request.url}")
+        return route.abort()
+    if route.request.resource_type == "media":
+        #print(f"Blocking the media request to: {route.request.url}")
+        return route.abort()
+    if route.request.resource_type == "fetch":
+        #print(f"Blocking the fetch request to: {route.request.url}")
+        return route.abort()
+    #if route.request.resource_type == "xhr":
+    #    print(f"Blocking the xhr request to: {route.request.url}")
+    #    return route.abort()
+
+    return route.continue_()
+
 def steam_login():
     with sync_playwright() as p:
         project_root = Path(__file__).parent  # This will get the directory where this script is located
@@ -421,11 +441,14 @@ if __name__ == "__main__":
     #steam_login()
     
     #with sync_playwright() as p:
-    #    project_root = Path(__file__).parent  # This will get the directory where this script is located
-    #    original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
-    #    browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
-    #    page = browser.new_page()
-    #    sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
-    #    save_knives_to_db([safe_get_knife_info("★ StatTrak™ Bayonet | Autotronic (Battle-Scarred)", page, sql_cursor, sql_connection, 6, logger)], sql_cursor, sql_connection)
+        #project_root = Path(__file__).parent  # This will get the directory where this script is located
+        #original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
+        #browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
+        #page = browser.new_page()
+        #page.route("**/*", route_intercept)
+        #sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+        #knife = safe_get_knife_info("★ StatTrak™ Bowie Knife | Freehand (Minimal Wear)", page, sql_cursor, sql_connection, 6, logger)
+        #print(knife)
+        #save_knives_to_db([knife], sql_cursor, sql_connection)
     update_all_knife_data('failed_knives.csv', logger)
     #update_all(sql_cursor)
