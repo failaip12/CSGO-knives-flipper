@@ -8,30 +8,44 @@ from mysql.connector.connection import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 from tqdm import tqdm
 
-from Knife import Knife
 from CustomLogger import CustomLogger
+from Knife import Knife
 
-def add_new_knives_to_db(names: List[str], cursor: MySQLCursor, connection: MySQLConnection) -> None:
+
+def add_new_knives_to_db(
+    names: List[str], cursor: MySQLCursor, connection: MySQLConnection
+) -> None:
     for name in tqdm(names):
         cursor.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
         if cursor.fetchone() is None:
             cursor.execute("INSERT INTO knives (knife_name) VALUES (%s)", (name,))
             connection.commit()
 
-#TODO: Optimize this b
-def get_and_save_historical_pricing_helper(data: List[List], date_format: str, cursor: MySQLCursor, connection: MySQLConnection, knife_id: int) -> Tuple[Optional[float], Optional[datetime]]:
+
+# TODO: Optimize this b
+def get_and_save_historical_pricing_helper(
+    data: List[List],
+    date_format: str,
+    cursor: MySQLCursor,
+    connection: MySQLConnection,
+    knife_id: int,
+) -> Tuple[Optional[float], Optional[datetime]]:
     price = None
     parsed_date = None
-    #TODO: Batch insert
+    # TODO: Batch insert
     for result in data:
         date_string = result[0][:-4]
         parsed_date = datetime.strptime(date_string, date_format)
         price = result[1]
         sold_count = result[2]
-        cursor.execute("SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)", (parsed_date,))
+        cursor.execute(
+            "SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)", (parsed_date,)
+        )
         existing_date = cursor.fetchone()
         if not existing_date:
-            cursor.execute("INSERT IGNORE INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,))
+            cursor.execute(
+                "INSERT IGNORE INTO SellTimes (sell_time) VALUES (%s)", (parsed_date,)
+            )
             connection.commit()
             date_id = cursor.lastrowid
         else:
@@ -42,16 +56,22 @@ def get_and_save_historical_pricing_helper(data: List[List], date_format: str, c
                 date_id = int(value)
             else:
                 date_id = None
-        #TODO: IGNORE should in theory be unnecessary
-        if(date_id is not None):
-            cursor.execute("INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)", (knife_id, date_id, price, sold_count))
+        # TODO: IGNORE should in theory be unnecessary
+        if date_id is not None:
+            cursor.execute(
+                "INSERT IGNORE INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s)",
+                (knife_id, date_id, price, sold_count),
+            )
             connection.commit()
     return price, parsed_date
 
-def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQLConnection) -> None:
+
+def save_knives_to_db(
+    knives: List[Knife], cursor: MySQLCursor, connection: MySQLConnection
+) -> None:
     if not knives:
         return
-    
+
     # Prepare the base update query
     base_query = """
         UPDATE knives SET
@@ -65,35 +85,41 @@ def save_knives_to_db(knives: List[Knife], cursor: MySQLCursor, connection: MySQ
             knife_image = %s
         WHERE knife_name = %s
     """
-    
+
     # Create a list of tuples with values for each knife
     values = []
     for knife in knives:
         # Populate the fields and handle optional fields with None
-        values.append((
-            knife.current_min_price_with_fee,
-            knife.current_min_price_without_fee,
-            knife.last_min_price_with_fee,
-            knife.last_min_price_without_fee,
-            knife.buy_order_price,
-            knife.last_updated,
-            knife.last_sold,
-            knife.knife_image,
-            knife.knife_name  # WHERE clause value
-        ))
-    
+        values.append(
+            (
+                knife.current_min_price_with_fee,
+                knife.current_min_price_without_fee,
+                knife.last_min_price_with_fee,
+                knife.last_min_price_without_fee,
+                knife.buy_order_price,
+                knife.last_updated,
+                knife.last_sold,
+                knife.knife_image,
+                knife.knife_name,  # WHERE clause value
+            )
+        )
+
     # Execute the batch update
     cursor.executemany(base_query, values)
     connection.commit()
 
-def get_knife_list_from_db(cursor: MySQLCursor, date: Optional[str] = None) -> List[str]:
-    if(date is None):
+
+def get_knife_list_from_db(
+    cursor: MySQLCursor, date: Optional[str] = None
+) -> List[str]:
+    if date is None:
         select_query = "SELECT knife_name FROM knives ORDER BY last_updated ASC"
     else:
         select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date} ORDER BY last_updated ASC"
     cursor.execute(select_query)
     knife_list = [name[0] for name in cursor.fetchall()]
     return knife_list
+
 
 def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
     cursor.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
@@ -102,21 +128,26 @@ def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
         # Create a Knife object from the fetched data
         knife = Knife(
             knife_id=row[0],
-            knife_name=row[1],
+            knife_name=str(row[1]),
             current_min_price_with_fee=row[2],
             current_min_price_without_fee=row[3],
             last_min_price_with_fee=row[4],
             last_min_price_without_fee=row[5],
             buy_order_price=row[6],
-            last_sold=row[9] if len(row) > 9 else None  # Last sold is optional
+            last_sold=row[9] if len(row) > 9 else None,  # Last sold is optional
         )
         return knife
     else:
         return None  # If no knife is found, return None
 
-def connect_to_db(host: str, database: str, port: int, user: str, password: str, logger: CustomLogger) -> Tuple[MySQLConnection, MySQLCursor]:
+
+def connect_to_db(
+    host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
+) -> Tuple[MySQLConnection, MySQLCursor]:
     try:
-        sql_connection = mysql.connector.connect(host=host, database=database, port=port, user=user, password=password)
+        sql_connection = mysql.connector.connect(
+            host=host, database=database, port=port, user=user, password=password
+        )
         if sql_connection.is_connected():
             sql_cursor = sql_connection.cursor()
         else:
@@ -128,17 +159,29 @@ def connect_to_db(host: str, database: str, port: int, user: str, password: str,
         exit(1)
     return sql_connection, sql_cursor
 
-def connect_to_db_threaded(host: str, database: str, port: int, user: str, password: str, logger: CustomLogger) -> Tuple[MySQLConnection, MySQLCursor]:
+
+def connect_to_db_threaded(
+    host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
+) -> Tuple[MySQLConnection, MySQLCursor]:
     # Create a new connection per thread
-    return connect_to_db(host=host, database=database, port=port, user=user, password=password, logger=logger)
+    return connect_to_db(
+        host=host,
+        database=database,
+        port=port,
+        user=user,
+        password=password,
+        logger=logger,
+    )
+
 
 def update_all(cursor: MySQLCursor) -> None:
     update_amount_sold(cursor)
     update_selling_frequency(cursor)
     update_amount_sold_last_year(cursor)
 
+
 def update_amount_sold(cursor: MySQLCursor) -> None:
-    update_query = '''
+    update_query = """
     UPDATE `knives`.`Knives` k
     JOIN (
         SELECT `knife_id`, COUNT(*) AS `total_sold`
@@ -146,12 +189,12 @@ def update_amount_sold(cursor: MySQLCursor) -> None:
         GROUP BY `knife_id`
     ) sh ON k.`knife_id` = sh.`knife_id`
     SET k.`amount_sold` = sh.`total_sold`;
-    '''
+    """
     cursor.execute(update_query)
 
 
 def update_selling_frequency(cursor: MySQLCursor) -> None:
-    update_query = '''
+    update_query = """
     UPDATE `knives`.`Knives` k
     JOIN (
         SELECT sh.`knife_id`, 
@@ -161,10 +204,12 @@ def update_selling_frequency(cursor: MySQLCursor) -> None:
         GROUP BY sh.`knife_id`
     ) sf ON k.`knife_id` = sf.`knife_id`
     SET k.`selling_frequency` = sf.`frequency`;
-    '''
+    """
     cursor.execute(update_query)
+
+
 def update_amount_sold_last_year(cursor: MySQLCursor) -> None:
-    update_query = '''
+    update_query = """
     WITH LastYearSales AS (
         SELECT 
             sh.knife_id,
@@ -182,5 +227,5 @@ def update_amount_sold_last_year(cursor: MySQLCursor) -> None:
     UPDATE Knives k
     LEFT JOIN LastYearSales lys ON k.knife_id = lys.knife_id
     SET k.amount_sold_last_year = COALESCE(lys.total_quantity_sold, 0);
-    '''
+    """
     cursor.execute(update_query)

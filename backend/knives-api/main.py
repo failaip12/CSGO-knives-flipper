@@ -1,25 +1,31 @@
+# py -m fastapi run .\main.py
+
 from typing import List
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from .model import Knives
+from model import Knives
+
 DATABASE_URL = "mysql+mysqlconnector://root:@localhost:3306/knives"
 
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 engine = create_engine(DATABASE_URL)
 
+
 @app.get("/")
 def read_root():
-    return {"Message" : "HELLO"}
+    return {"Message": "HELLO"}
+
 
 @app.get("/knives")
 def read_knives() -> List[Knives]:

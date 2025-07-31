@@ -1,10 +1,12 @@
-from enum import Enum, auto
-from datetime import datetime
-import os
 import inspect
+import os
+from datetime import datetime
+from enum import Enum, auto
+
 
 class LogLevel(Enum):
     """Enum for defining log levels."""
+
     DEBUG = auto()
     INFO = auto()
     WARNING = auto()
@@ -21,15 +23,24 @@ class LogLevel(Enum):
             "[ERROR]": cls.ERROR,
             "[FATAL]": cls.FATAL,
         }
-        return level_mapping.get(level_str.upper(), cls.INFO)  # Default to INFO if not found
+        return level_mapping.get(
+            level_str.upper(), cls.INFO
+        )  # Default to INFO if not found
 
 
 class CustomLogger:
-    def __init__(self, log_file: str = "app.log", log_level: LogLevel = LogLevel.INFO, log_format: str = "{timestamp} - {level} - {file}:{line} - {message}") -> None:
+    def __init__(
+        self,
+        log_file: str = "app.log",
+        log_level: LogLevel = LogLevel.INFO,
+        log_format: str = "{timestamp} - {level} - {file}:{line} - {message}",
+    ) -> None:
         # Check if log_level is a valid LogLevel enum member
         if not isinstance(log_level, LogLevel):
-            raise ValueError(f"Invalid log level: {log_level}. Must be one of {', '.join([level.name for level in LogLevel])}.")
-        
+            raise ValueError(
+                f"Invalid log level: {log_level}. Must be one of {', '.join([level.name for level in LogLevel])}."
+            )
+
         self.log_file = log_file
         self.log_level = log_level
         self.log_format = log_format
@@ -38,24 +49,27 @@ class CustomLogger:
     def _setup_log_file(self) -> None:
         """Ensure log file exists or create a new one."""
         if not os.path.exists(self.log_file):
-            with open(self.log_file, 'w', encoding='utf-8') as file:
+            with open(self.log_file, "w", encoding="utf-8") as file:
                 file.write("")  # Create the file if it doesn't exist.
 
     def _get_formatted_message(self, level: LogLevel, message: str) -> str:
         """Format log message with timestamp, log level, file, line number, and the custom message."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        frame = inspect.currentframe().f_back.f_back.f_back  # Go back two frames to find the caller
-        file_name = os.path.basename(frame.f_code.co_filename)  # Get the file name of the caller
+        frame = (
+            inspect.currentframe().f_back.f_back.f_back
+        )  # Go back two frames to find the caller
+        file_name = os.path.basename(
+            frame.f_code.co_filename
+        )  # Get the file name of the caller
         line_number = frame.f_lineno  # Get the line number of the caller
-        
+
         return self.log_format.format(
             timestamp=timestamp,
             level=level.name,
             message=message,
             file=file_name,
-            line=line_number
+            line=line_number,
         )
-
 
     def _log(self, level: LogLevel, message: str) -> None:
         """Log a message if the log level is higher than the current set level."""
@@ -68,13 +82,13 @@ class CustomLogger:
         print(formatted_message)
 
         # Write to file with UTF-8 encoding (appending)
-        with open(self.log_file, 'a', encoding='utf-8') as file:
+        with open(self.log_file, "a", encoding="utf-8") as file:
             file.write(formatted_message + "\n")
 
     def debug(self, message: str) -> None:
         """Log a debug message."""
         self._log(LogLevel.DEBUG, message)
-    
+
     def info(self, message: str) -> None:
         """Log an informational message."""
         self._log(LogLevel.INFO, message)
@@ -86,7 +100,7 @@ class CustomLogger:
     def error(self, message: str) -> None:
         """Log an error message."""
         self._log(LogLevel.ERROR, message)
-    
+
     def fatal(self, message: str) -> None:
         """Log a fatal message."""
         self._log(LogLevel.FATAL, message)
