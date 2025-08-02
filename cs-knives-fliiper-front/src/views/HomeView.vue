@@ -23,6 +23,7 @@ const perPage = ref(50)
 const maxBuyOrderPrice = ref<number | null>(null)
 const minProfit = ref<number | null>(null)
 const minSold = ref<number | null>(null)
+const sortBy = ref('profit')
 
 onMounted(async () => {
   try {
@@ -49,11 +50,19 @@ const filteredKnives = computed(() => {
   if (minSold.value !== null) {
     filtered = filtered.filter((knife) => knife.amount_sold_last_year >= minSold.value!)
   }
-  filtered.sort((a, b) => {
-    const profitA = a.last_min_price_without_fee - a.buy_order_price
-    const profitB = b.last_min_price_without_fee - b.buy_order_price
-    return profitB - profitA
-  })
+  if (sortBy.value === 'profit') {
+    filtered.sort((a, b) => {
+      const profitA = a.last_min_price_without_fee - a.buy_order_price
+      const profitB = b.last_min_price_without_fee - b.buy_order_price
+      return profitB - profitA
+    })
+  } else if (sortBy.value === 'name') {
+    filtered.sort((a, b) => a.knife_name.localeCompare(b.knife_name))
+  } else if (sortBy.value === 'amount_sold') {
+    filtered.sort((a, b) => b.amount_sold_last_year - a.amount_sold_last_year)
+  } else if (sortBy.value === 'buy_order_price') {
+    filtered.sort((a, b) => a.buy_order_price - b.buy_order_price)
+  }
 
   return filtered
 })
@@ -116,6 +125,15 @@ const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value)
           placeholder="Enter min sold"
           class="form-input"
         />
+      </div>
+      <div class="form-group">
+        <label for="sortBy">Sort By:</label>
+        <select id="sortBy" v-model="sortBy" class="form-input">
+          <option value="profit">Profit</option>
+          <option value="name">Name</option>
+          <option value="amount_sold">Amount Sold</option>
+          <option value="buy_order_price">Buy Order Price</option>
+        </select>
       </div>
       <div class="form-buttons">
         <button
