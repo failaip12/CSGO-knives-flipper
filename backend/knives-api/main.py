@@ -1,11 +1,13 @@
 # py -m fastapi run .\main.py
-
-from typing import List
+import os
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pysteamsignin.steamsignin import SteamSignIn
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from steampy.client import SteamClient
 
 from model import Knives
 
@@ -20,6 +22,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 engine = create_engine(DATABASE_URL)
+steam_login = SteamSignIn()
+STEAM_API_KEY = os.environ.get("STEAM_API_KEY")
+STEAM_USERNAME = os.environ.get("STEAM_USERNAME")
+login_cookies = {"steamLoginSecure": os.environ.get("STEAM_COOKIE_STEAM_LOGIN_SECURE")}
+
+steam_client = SteamClient(
+    STEAM_API_KEY,
+    username=STEAM_USERNAME,
+    login_cookies=login_cookies,
+)
+
+
+def filter_listings_to_knives(listings: Dict) -> Optional[List[str]]:
+    knife_names = []
+    orders = listings.get("buy_orders")
+    if orders is None:
+        return None
+    assert orders is not None
+    for order_id in orders:
+        actual_listing = orders.get(order_id)
+        game_name = actual_listing.get("game_name")
+        item_name = actual_listing.get("item_name").lower()
+
+        if game_name == "Counter-Strike 2" and any(
+            keyword in item_name
+            for keyword in ["knife", "bayonet", "karambit", "shadow daggers"]
+        ):
+            knife_names.append(actual_listing.get("item_name"))
+    return knife_names
 
 
 @app.get("/")
@@ -35,3 +66,10 @@ def read_knives() -> List[Knives]:
     for knife in session.scalars(stmt):
         resp.append(knife)
     return resp
+
+
+@app.get("/buy_orders")
+async def get_buy_orders():
+    listings = steam_client.market.get_my_market_listings()
+    knife_names_actual = filter_listings_to_knives(listings)
+    return knife_names_actual

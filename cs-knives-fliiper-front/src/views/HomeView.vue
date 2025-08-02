@@ -18,21 +18,13 @@ interface Knife {
 }
 
 const knives = ref<Knife[]>([])
+const buyOrders = ref<string[]>([])
 const page = ref(1)
 const perPage = ref(50)
 const maxBuyOrderPrice = ref<number | null>(null)
 const minProfit = ref<number | null>(null)
 const minSold = ref<number | null>(null)
 const sortBy = ref('profit')
-
-onMounted(async () => {
-  try {
-    const response = await fetch('http://localhost:8000/knives')
-    knives.value = await response.json()
-  } catch (error) {
-    console.error('Fetch error:', error)
-  }
-})
 
 const filteredKnives = computed(() => {
   let filtered = knives.value.filter((knife) => knife.buy_order_price != null)
@@ -50,6 +42,12 @@ const filteredKnives = computed(() => {
   if (minSold.value !== null) {
     filtered = filtered.filter((knife) => knife.amount_sold_last_year >= minSold.value!)
   }
+
+  if (buyOrders.value && buyOrders.value.length > 0) {
+    const buyOrderNames = new Set(buyOrders.value.map((order) => order))
+    filtered = filtered.filter((knife) => !buyOrderNames.has(knife.knife_name))
+  }
+
   if (sortBy.value === 'profit') {
     filtered.sort((a, b) => {
       const profitA = a.last_min_price_without_fee - a.buy_order_price
@@ -85,6 +83,24 @@ function prevPage() {
   }
 }
 const totalPages = computed(() => Math.ceil(knives.value.length / perPage.value))
+onMounted(async () => {
+  try {
+    const response = await fetch('http://localhost:8000/knives')
+    knives.value = await response.json()
+  } catch (error) {
+    console.error('Fetch error:', error)
+  }
+
+  try {
+    const response = await fetch(
+      `http://localhost:8000/buy_orders`
+    )
+    const data = await response.json()
+    buyOrders.value = data
+  } catch (error) {
+    console.error('Fetch error:', error)
+  }
+})
 </script>
 
 <template>
