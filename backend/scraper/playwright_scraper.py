@@ -8,12 +8,19 @@ from bisect import bisect_left
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from unittest.mock import DEFAULT
 
 from bs4 import BeautifulSoup
+from mysql.connector.connection import MySQLConnection
+from mysql.connector.cursor import MySQLCursor
+from playwright.sync_api import Page, TimeoutError, sync_playwright
+from tqdm import tqdm
+
 from common import copy_user_data_dir, load_failed_knives_csv, log_failed_knives
 from CustomLogger import CustomLogger
 from db_operations import (
+    add_new_knives_to_db,
     connect_to_db,
     connect_to_db_threaded,
     get_and_save_historical_pricing_helper,
@@ -23,11 +30,103 @@ from db_operations import (
     update_all,
 )
 from Knife import Knife
-from mysql.connector.connection import MySQLConnection
-from mysql.connector.cursor import MySQLCursor
-from playwright.sync_api import Page, sync_playwright
-from selenium_scraper import ExtractedData
-from tqdm import tqdm
+
+ExtractedData = Dict[str, List[Any]]
+
+
+def navigate_and_wait(page: Page, url: str, wait_time: int, retries: int = 3) -> bool:
+    for i in range(retries):
+        try:
+            page.goto(url)
+            page.wait_for_selector(
+                '//span[@class="market_listing_item_name"]',
+                timeout=wait_time * 1000,
+            )
+            return True  # success
+        except TimeoutError:
+            print(f"Timeout loading {url}, retry {i + 1}/{retries}")
+            time.sleep(5)
+    print(f"Failed to load {url} after {retries} retries.")
+    return False
+
+
+DEFAULT_NUMBER_OF_PAGES = 200
+
+
+def get_knife_list(page: Page, wait_time: int) -> Set[str]:
+    range_start = 0
+    base_url = "https://steamcommunity.com/market/search?q=&category_730_ItemSet[]=any&category_730_ProPlayer[]=any&category_730_StickerCapsule[]=any&category_730_TournamentTeam[]=any&category_730_Weapon[]=any&category_730_Type[]=tag_CSGO_Type_Knife&appid=730#p{}_name_asc"
+    knife_name_set = set()
+
+    if not navigate_and_wait(page, base_url.format(range_start + 1), wait_time):
+        return knife_name_set  # return empty set if first page fails
+
+    soup = BeautifulSoup(page.content(), "html.parser")
+
+    number_of_pages_span = soup.find("span", id="searchResults_links")
+    if number_of_pages_span:
+        page_links = number_of_pages_span.find_all(
+            "span", class_="market_paging_pagelink"
+        )
+        if page_links:
+            last_page_text = page_links[-1].text.strip()
+            try:
+                number_of_pages = int(last_page_text)
+            except ValueError:
+                print(
+                    f"Could not parse number of pages from '{last_page_text}'. Defaulting to {DEFAULT_NUMBER_OF_PAGES}."
+                )
+                number_of_pages = DEFAULT_NUMBER_OF_PAGES
+        else:
+            print(
+                f"Could not find page links. Defaulting to {DEFAULT_NUMBER_OF_PAGES}."
+            )
+            number_of_pages = DEFAULT_NUMBER_OF_PAGES
+    else:
+        print(
+            f"Could not find search results links. Defaulting to {DEFAULT_NUMBER_OF_PAGES}."
+        )
+        number_of_pages = DEFAULT_NUMBER_OF_PAGES
+
+    names = soup.find_all("span", class_="market_listing_item_name")
+    new_names: List[str] = []
+    for name in names:
+        knife_name_set.add(name.text.strip())
+
+    for page_num in tqdm(range(range_start + 2, number_of_pages + 1)):
+        if not navigate_and_wait(page, base_url.format(page_num), wait_time):
+            continue  # skip to next page if navigation fails
+
+        soup = BeautifulSoup(page.content(), "html.parser")
+        names = soup.find_all("span", class_="market_listing_item_name")
+        error = soup.find_all("h3")
+        fail_counter = 0
+        while error or len(names) < 5 or names == new_names:
+            fail_counter += 1
+            if fail_counter > 3:
+                print(f"Failed to load page {page_num} after 3 attempts.")
+                break
+            page.reload()
+            try:
+                page.wait_for_selector(
+                    '//span[@class="market_listing_item_name"]',
+                    timeout=wait_time * 1000,
+                )
+            except TimeoutError:
+                print(
+                    f"Timeout on page {page_num} while reloading. Breaking inner loop."
+                )
+                break
+            soup = BeautifulSoup(page.content(), "html.parser")
+            names = soup.find_all("span", class_="market_listing_item_name")
+            error = soup.find_all("h3")
+
+        new_names = names.copy()
+        print("\n", len(knife_name_set))
+        for name in names:
+            knife_name_set.add(name.text.strip())
+
+    return knife_name_set
 
 
 def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
@@ -385,9 +484,9 @@ def initialize_directory(logger: CustomLogger) -> str:
         __file__
     ).parent  # This will get the directory where this script is located
     original_user_data_dir = (
-        project_root / "playwright_cache"
-    )  # Relative path to 'playwright_cache' directory
-    # Ensure the path is valid
+        project_root
+        / "playwright_cache"  # Relative path to 'playwright_cache' directory
+    )  # Ensure the path is valid
     if not original_user_data_dir.exists():
         raise FileNotFoundError(
             f"User data directory {original_user_data_dir} does not exist."
@@ -582,8 +681,9 @@ def steam_login():
             __file__
         ).parent  # This will get the directory where this script is located
         original_user_data_dir = (
-            project_root / "playwright_cache"
-        )  # Relative path to 'playwright_cache' directory
+            project_root
+            / "playwright_cache"  # Relative path to 'playwright_cache' directory
+        )
         browser = p.chromium.launch_persistent_context(
             user_data_dir=original_user_data_dir, headless=False
         )
