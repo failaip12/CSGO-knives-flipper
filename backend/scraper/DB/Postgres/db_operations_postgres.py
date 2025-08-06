@@ -182,6 +182,7 @@ def update_amount_sold(cur: cursor) -> None:
     WHERE k.knife_id = sh.knife_id;
     """
     cur.execute(update_query)
+    cur.connection.commit()
 
 
 def update_selling_frequency(cur: cursor) -> None:
@@ -199,6 +200,7 @@ def update_selling_frequency(cur: cursor) -> None:
     WHERE k.knife_id = sf.knife_id;
     """
     cur.execute(update_query)
+    cur.connection.commit()
 
 
 def update_amount_sold_last_year(cur: cursor) -> None:
@@ -222,3 +224,4 @@ def update_amount_sold_last_year(cur: cursor) -> None:
     WHERE k.knife_id = lys.knife_id;
     """
     cur.execute(update_query)
+    cur.connection.commit()

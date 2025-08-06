@@ -55,13 +55,19 @@ class CustomLogger:
     def _get_formatted_message(self, level: LogLevel, message: str) -> str:
         """Format log message with timestamp, log level, file, line number, and the custom message."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        frame = (
-            inspect.currentframe().f_back.f_back.f_back
-        )  # Go back two frames to find the caller
+        frame = inspect.currentframe()
+        # Safely traverse back three frames, checking for None
+        for _ in range(3):
+            if frame is not None and frame.f_back is not None:
+                frame = frame.f_back
+            else:
+                break
         file_name = os.path.basename(
-            frame.f_code.co_filename
+            frame.f_code.co_filename if frame is not None else "unknown"
         )  # Get the file name of the caller
-        line_number = frame.f_lineno  # Get the line number of the caller
+        line_number = (
+            frame.f_lineno if frame is not None else -1
+        )  # Get the line number of the caller
 
         return self.log_format.format(
             timestamp=timestamp,

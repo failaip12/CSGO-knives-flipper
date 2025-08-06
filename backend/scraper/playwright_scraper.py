@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 from playwright.sync_api import Page, TimeoutError, sync_playwright
 from psycopg2.extensions import connection, cursor
 from tqdm import tqdm
@@ -67,7 +68,8 @@ def get_knife_list(page: Page, wait_time: int) -> Set[str]:
 
     soup = BeautifulSoup(page.content(), "html.parser")
     number_of_pages_span = soup.find("span", id="searchResults_links")
-    if number_of_pages_span:
+
+    if isinstance(number_of_pages_span, Tag):
         page_links = number_of_pages_span.find_all(
             "span", class_="market_paging_pagelink"
         )
@@ -83,16 +85,17 @@ def get_knife_list(page: Page, wait_time: int) -> Set[str]:
         number_of_pages = DEFAULT_NUMBER_OF_PAGES
 
     names = soup.find_all("span", class_="market_listing_item_name")
+    names = [name.text.strip() for name in names]
     new_names: List[str] = []
     for name in names:
-        knife_name_set.add(name.text.strip())
-
+        knife_name_set.add(name)
     for page_num in tqdm(range(range_start + 2, number_of_pages + 1)):
         if not navigate_and_wait(page, base_url.format(page_num), wait_time):
             continue
 
         soup = BeautifulSoup(page.content(), "html.parser")
         names = soup.find_all("span", class_="market_listing_item_name")
+        names = [name.text.strip() for name in names]
         error = soup.find_all("h3")
         fail_counter = 0
         while error or len(names) < 5 or names == new_names:
@@ -113,12 +116,13 @@ def get_knife_list(page: Page, wait_time: int) -> Set[str]:
                 break
             soup = BeautifulSoup(page.content(), "html.parser")
             names = soup.find_all("span", class_="market_listing_item_name")
+            names = [name.text.strip() for name in names]
             error = soup.find_all("h3")
 
-        new_names = names.copy()
+        new_names = list(names)
         print("\n", len(knife_name_set))
         for name in names:
-            knife_name_set.add(name.text.strip())
+            knife_name_set.add(name)
 
     return knife_name_set
 
@@ -157,7 +161,7 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
             state="attached",
             timeout=wait_time * 1000,
         )
-    except:
+    except TimeoutError:
         pass
     buy_orders_text = []
     current_min_price_with_fee_text = []
@@ -175,10 +179,12 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
             element.inner_text() for element in current_min_price_with_fee_elements
         ]
 
-        img_src = page.locator(".market_listing_largeimage img").get_attribute("src")
+        img_src = page.locator(".market_listing_largeimage img").get_attribute(
+            "src", timeout=1000
+        )
         # current_min_price_without_fee_text = [element.text for element in driver.find_elements(By.CLASS_NAME, "market_listing_price.market_listing_price_without_fee")]
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Error extracting knife data: {e}")
     soup = BeautifulSoup(page.content(), "html.parser")
     message = soup.find_all("div", class_="market_listing_table_message")
     # print("-----------------")
@@ -191,8 +197,10 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
     # TODO: Clean up this mess
     if len(message) == 0:
         message_div = soup.find("div", id="message")
-        if message_div is not None:
-            message = message_div.find("h3").text.strip()
+        if message_div is not None and isinstance(message_div, Tag):
+            h3_elements = message_div.find_all("h3")
+            if h3_elements:
+                message = h3_elements[0].text.strip()
     data = {
         "buy_orders": buy_orders_text,
         "current_min_price_with_fee": current_min_price_with_fee_text,
@@ -328,19 +336,21 @@ def get_knife_info(
         return None
     current_price = True
     # Handle cases where there is an error message
-    if isinstance(data.get("message"), str):
-        if "made too many requests" in data.get("message"):
+    message = data.get("message")
+    if isinstance(message, str):
+        if "made too many requests" in message:
             # TODO: The detection is somehow wrong idk... steam bans us but we can continue anyways
             logger.fatal(f"Too many requests {name}, stopping...")
-            logger.fatal(f"Message: {data.get('message')}")
+            logger.fatal(f"Message: {message}")
             exit(1)
             return None
 
-        if "no listings" in data.get("message"):
+        if "no listings" in message:
             current_price = False
     else:
-        if data.get("message") and data.get("message")[0].text:
-            if "no listings" in data.get("message")[0].text:
+        message = data.get("message")
+        if message is not None and len(message) > 0 and hasattr(message[0], "text"):
+            if "no listings" in message[0].text:
                 current_price = False
             else:
                 # TODO: Add a retry mechanism
@@ -350,13 +360,15 @@ def get_knife_info(
 
     # Handle cases where required data is not available
     buy_orders = True
-    if len(data.get("buy_orders")) < 2:
+    buy_orders_list = data.get("buy_orders")
+    if not buy_orders_list or len(buy_orders_list) < 2:
         # print(data['buy_orders'])
         logger.error(f"No buy orders {name}")
         buy_orders = False
         # return None
 
-    if len(data.get("current_min_price_with_fee")) < 1:
+    current_min_price_with_fee_list = data.get("current_min_price_with_fee")
+    if not current_min_price_with_fee_list or len(current_min_price_with_fee_list) < 1:
         logger.info(f"No current price {name}")
         current_price = False
         # return None
@@ -364,19 +376,25 @@ def get_knife_info(
     current_min_price_with_fee = None
     # current_min_price_without_fee = None
     if current_price:
-        text = (
-            data.get("current_min_price_with_fee")[0]
-            .strip()
-            .replace(",", ".")
-            .replace("-", "0")
-            .replace("€", "")
-            .replace(" ", "")
-        )
-        try:
-            current_min_price_with_fee = float(text)
-        except Exception as e:
+        current_min_price_with_fee_list = data.get("current_min_price_with_fee")
+        if current_min_price_with_fee_list and len(current_min_price_with_fee_list) > 0:
+            text = (
+                current_min_price_with_fee_list[0]
+                .strip()
+                .replace(",", ".")
+                .replace("-", "0")
+                .replace("€", "")
+                .replace(" ", "")
+            )
+            try:
+                current_min_price_with_fee = float(text)
+            except Exception as e:
+                logger.error(
+                    f"Could not parse current_min_price_with_fee {text} for knife {name}: {e}"
+                )
+        else:
             logger.error(
-                f"Could not parse current_min_price_with_fee {text} for knife {name}: {e}"
+                f"current_min_price_with_fee is None or empty for knife {name}"
             )
 
         # text = data['current_min_price_without_fee'][0].replace(",", ".").replace("-", "0").replace("€", "").replace(" ", "").strip()
@@ -387,15 +405,19 @@ def get_knife_info(
 
     buy_order_price = None
     if buy_orders:
-        buy_order_price = float(
-            data.get("buy_orders")[1]
-            .replace(",", ".")
-            .replace("-", "0")
-            .replace("€", "")
-            .replace(" ", "")
-            .strip()
-        )
+        buy_orders_list = data.get("buy_orders")
+        if buy_orders_list is not None and len(buy_orders_list) > 1:
+            buy_order_price = float(
+                buy_orders_list[1]
+                .replace(",", ".")
+                .replace("-", "0")
+                .replace("€", "")
+                .replace(" ", "")
+                .strip()
+            )
     knife_image = data.get("knife_image")
+    if isinstance(knife_image, list):
+        knife_image = knife_image[0] if knife_image else None
     # Extract knife_id using regular expression
     knife_id = None
     desired_line = None
@@ -467,7 +489,9 @@ def safe_get_knife_info(
 ) -> Optional[Knife]:
     """A wrapper that catches and logs errors for get_knife_info."""
     try:
-        knife_info = get_knife_info(name, page, cursor, connection, wait_time, logger)
+        knife_info = get_knife_info(
+            name[0], page, cursor, connection, wait_time, logger
+        )
         return knife_info
     except Exception as e:
         logger.error(f"Error processing knife {name}: {e}")
@@ -489,7 +513,7 @@ def initialize_directory(logger: CustomLogger) -> str:
 
     # Copy the user-data-dir to a new unique directory for this thread
     user_data_dir = copy_user_data_dir(
-        original_user_data_dir, logger, "playwright_cache"
+        str(original_user_data_dir), logger, "playwright_cache"
     )
     # print(user_data_dir)
     return user_data_dir
@@ -537,7 +561,7 @@ def fetch_all_knives_for_thread(
             if knife_info:
                 batch.append(knife_info)
             else:
-                failed_knives.append(knife_name)
+                failed_knives.append(knife_name[0])
 
             progress_bar.update(1)
             if len(batch) == batch_size:
@@ -616,7 +640,9 @@ def update_all_knife_data(
     knife_names = get_knife_list_from_db(sql_cursor, date)
     # knife_names = load_failed_knives_csv('fk.csv', logger)
     # Update database with additional calculations
-    process_knives(logger, knife_names, failed_knives_name, wait_time)
+    process_knives(
+        logger, [(name,) for name in knife_names], failed_knives_name, wait_time
+    )
     update_all(sql_cursor)
     failed = load_failed_knives_csv(failed_knives_name, logger)
     if len(failed) > 0:
@@ -680,23 +706,41 @@ if __name__ == "__main__":
     MAX_FAILED_KNIVES = 10
     MAX_RETRY_COUNT = 5
     # steam_login()
-
+    # sql_connection, sql_cursor = connect_to_db(
+    #     "localhost",
+    #     "knives",
+    #     DATABASE_PORT,
+    #     DATABASE_USERNAME,
+    #     DATABASE_PASSWORD,
+    #     logger,
+    # )
     # with sync_playwright() as p:
-    # project_root = Path(__file__).parent  # This will get the directory where this script is located
-    # original_user_data_dir = project_root / "playwright_cache"  # Relative path to 'playwright_cache' directory
-    # browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
-    # page = browser.new_page()
-    # page.route("**/*", route_intercept)
-    sql_connection, sql_cursor = connect_to_db(
-        "localhost",
-        "knives",
-        DATABASE_PORT,
-        DATABASE_USERNAME,
-        DATABASE_PASSWORD,
-        logger,
-    )
-    # knife = safe_get_knife_info("★ StatTrak™ Bowie Knife | Freehand (Minimal Wear)", page, sql_cursor, sql_connection, 6, logger)
-    # print(knife)
-    # save_knives_to_db([knife], sql_cursor, sql_connection)
+    #     project_root = Path(
+    #         __file__
+    #     ).parent  # This will get the directory where this script is located
+    #     original_user_data_dir = (
+    #         project_root / "playwright_cache"
+    #     )  # Relative path to 'playwright_cache' directory
+    #     browser = p.chromium.launch_persistent_context(
+    #         user_data_dir=original_user_data_dir, headless=False
+    #     )  # Headless True doesnt transfer the log in state properly
+    #     page = browser.new_page()
+    #     page.route("**/*", route_intercept)
+
+    # add_new_knives_to_db(get_knife_list(page, 6), sql_cursor, sql_connection)
+
+    #     knife = safe_get_knife_info(
+    #         ("★",),
+    #         page,
+    #         sql_cursor,
+    #         sql_connection,
+    #         6,
+    #         logger,
+    #     )
+    #     print(knife)
+    #     if knife:
+    #         save_knives_to_db([knife], sql_cursor, sql_connection)
+    #     else:
+    #         print("Knife not found or could not be processed.")
     update_all_knife_data("failed_knives.csv", logger)
     # update_all(sql_cursor)
