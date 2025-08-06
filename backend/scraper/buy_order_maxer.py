@@ -12,7 +12,8 @@ from steampy.client import SteamClient
 from steampy.models import Currency, GameOptions
 
 from CustomLogger import CustomLogger, LogLevel
-from db_operations import connect_to_db, save_knives_to_db
+from DB.MySQL.config_mysql import DATABASE_PASSWORD, DATABASE_PORT, DATABASE_USERNAME
+from DB.MySQL.db_operations_mysql import connect_to_db, save_knives_to_db
 from Knife import Knife
 from selenium_scraper import initialize_driver, safe_get_knife_info
 
@@ -327,8 +328,11 @@ if __name__ == "__main__":
         "steamLoginSecure": os.environ.get("STEAM_COOKIE_STEAM_LOGIN_SECURE")
     }  # provide dict with cookies
     # TODO: Extract and update the cookie using selenium
+    steam_api_key = os.environ.get("STEAM_API")
+    if not steam_api_key:
+        raise ValueError("STEAM_API_KEY environment variable is not set.")
     steam_client = SteamClient(
-        os.environ.get("STEAM_API"),
+        steam_api_key,
         username=os.environ.get("STEAM_USERNAME"),
         login_cookies=login_cookies,
     )
@@ -382,7 +386,14 @@ if __name__ == "__main__":
         logger.info(
             f"Item: {order.get('item_name')}, your current buy order price: {order.get('price')}, maximum price: {order.get('max_price')}"
         )
-    connection, cursor = connect_to_db("localhost", "knives", 3306, "root", "", logger)
+    connection, cursor = connect_to_db(
+        "localhost",
+        "knives",
+        DATABASE_PORT,
+        DATABASE_USERNAME,
+        DATABASE_PASSWORD,
+        logger,
+    )
     driver, user_data_dir = initialize_driver(True, logger)
     while True:
         try:

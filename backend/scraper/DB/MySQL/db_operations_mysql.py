@@ -72,7 +72,6 @@ def save_knives_to_db(
     if not knives:
         return
 
-    # Prepare the base update query
     base_query = """
         UPDATE knives SET
             current_min_price_with_fee = %s,
@@ -86,10 +85,8 @@ def save_knives_to_db(
         WHERE knife_name = %s
     """
 
-    # Create a list of tuples with values for each knife
     values = []
     for knife in knives:
-        # Populate the fields and handle optional fields with None
         values.append(
             (
                 knife.current_min_price_with_fee,
@@ -100,11 +97,10 @@ def save_knives_to_db(
                 knife.last_updated,
                 knife.last_sold,
                 knife.knife_image,
-                knife.knife_name,  # WHERE clause value
+                knife.knife_name,
             )
         )
 
-    # Execute the batch update
     cursor.executemany(base_query, values)
     connection.commit()
 
@@ -117,33 +113,44 @@ def get_knife_list_from_db(
     else:
         select_query = f"SELECT knife_name FROM knives WHERE last_updated < {date} ORDER BY last_updated ASC"
     cursor.execute(select_query)
-    knife_list = [name[0] for name in cursor.fetchall()]
+    knife_list = [str(name[0]) for name in cursor.fetchall()]
     return knife_list
 
 
 def get_knife_from_db(cursor: MySQLCursor, name: str) -> Optional[Knife]:
     cursor.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
-    row = cursor.fetchone()  # Fetch a single row
+    row = cursor.fetchone()
     if row:
-        # Create a Knife object from the fetched data
         knife = Knife(
             knife_id=row[0],
             knife_name=str(row[1]),
-            current_min_price_with_fee=row[2],
-            current_min_price_without_fee=row[3],
-            last_min_price_with_fee=row[4],
-            last_min_price_without_fee=row[5],
-            buy_order_price=row[6],
-            last_sold=row[9] if len(row) > 9 else None,  # Last sold is optional
+            current_min_price_with_fee=float(row[2])
+            if isinstance(row[2], (int, float, Decimal))
+            else None,
+            current_min_price_without_fee=float(row[3])
+            if isinstance(row[3], (int, float, Decimal))
+            else None,
+            last_min_price_with_fee=float(row[4])
+            if isinstance(row[4], (int, float, Decimal))
+            else None,
+            last_min_price_without_fee=float(row[5])
+            if isinstance(row[5], (int, float, Decimal))
+            else None,
+            buy_order_price=float(row[6])
+            if isinstance(row[6], (int, float, Decimal))
+            else None,
+            last_sold=row[9]
+            if len(row) > 9 and isinstance(row[9], datetime)
+            else None,  # Last sold is optional
         )
         return knife
     else:
-        return None  # If no knife is found, return None
+        return None
 
 
 def connect_to_db(
     host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
-) -> Tuple[MySQLConnection, MySQLCursor]:
+):
     try:
         sql_connection = mysql.connector.connect(
             host=host, database=database, port=port, user=user, password=password
@@ -162,8 +169,7 @@ def connect_to_db(
 
 def connect_to_db_threaded(
     host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
-) -> Tuple[MySQLConnection, MySQLCursor]:
-    # Create a new connection per thread
+):
     return connect_to_db(
         host=host,
         database=database,

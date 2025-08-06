@@ -25,7 +25,8 @@ from tqdm import tqdm
 
 from common import copy_user_data_dir, log_failed_knives
 from CustomLogger import CustomLogger
-from db_operations import (
+from DB.MySQL.config_mysql import DATABASE_PASSWORD, DATABASE_PORT, DATABASE_USERNAME
+from DB.MySQL.db_operations_mysql import (
     connect_to_db,
     connect_to_db_threaded,
     get_and_save_historical_pricing_helper,
@@ -522,14 +523,14 @@ def fetch_all_knives_for_thread(
     connection, cursor = connect_to_db_threaded(
         host="localhost",
         database="knives",
-        port=3306,
-        user="root",
-        password="",
+        port=DATABASE_PORT,
+        user=DATABASE_USERNAME,
+        password=DATABASE_PASSWORD,
         logger=logger,
     )
     # Initialize the driver once per thread
     driver, user_data_dir = initialize_driver(True, logger)
-    batch = list()
+    batch = []
 
     # Store thread-specific resources in thread-local storage
     thread_resources.driver = driver
@@ -556,12 +557,12 @@ def fetch_all_knives_for_thread(
             batch.clear()
         if len(failed_knives) == fail_batch_size:
             log_failed_knives(
-                failed_knives, failed_knives_name
+                failed_knives, failed_knives_name, logger
             )  # Log all failed knives for this batch
             failed_knives.clear()  # Clear the list for the next batch
 
     if failed_knives:
-        log_failed_knives(failed_knives, failed_knives_name)
+        log_failed_knives(failed_knives, failed_knives_name, logger)
     driver.quit()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
     connection.close()
@@ -620,7 +621,12 @@ def update_all_knife_data(
     try:
         # Connect to the database
         sql_connection, sql_cursor = connect_to_db(
-            "localhost", "knives", 3306, "root", "", logger
+            "localhost",
+            "knives",
+            DATABASE_PORT,
+            DATABASE_USERNAME,
+            DATABASE_PASSWORD,
+            logger,
         )
 
         # Get knife names from the database

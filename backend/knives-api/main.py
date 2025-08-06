@@ -11,7 +11,8 @@ from steampy.client import SteamClient
 
 from model import Knives
 
-DATABASE_URL = "mysql+mysqlconnector://root:@localhost:3306/knives"
+# from ..scraper.DB.MySQL.config_mysql import DATABASE_URL
+from ..scraper.DB.Postgres.config_postgres import DATABASE_URL
 
 app = FastAPI()
 app.add_middleware(
@@ -24,6 +25,8 @@ app.add_middleware(
 engine = create_engine(DATABASE_URL)
 steam_login = SteamSignIn()
 STEAM_API_KEY = os.environ.get("STEAM_API_KEY")
+if not STEAM_API_KEY:
+    raise ValueError("STEAM_API_KEY environment variable is not set.")
 STEAM_USERNAME = os.environ.get("STEAM_USERNAME")
 login_cookies = {"steamLoginSecure": os.environ.get("STEAM_COOKIE_STEAM_LOGIN_SECURE")}
 

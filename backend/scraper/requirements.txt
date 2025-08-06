@@ -2,6 +2,7 @@ python-dotenv
 steampy
 selenium
 mysql-connector-python
+psycopg2-binary
 selenium-wire-2
 tqdm
 beautifulsoup4

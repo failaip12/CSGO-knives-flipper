@@ -9,18 +9,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from unittest.mock import DEFAULT
 
 from bs4 import BeautifulSoup
-from mysql.connector.connection import MySQLConnection
-from mysql.connector.cursor import MySQLCursor
 from playwright.sync_api import Page, TimeoutError, sync_playwright
+from psycopg2.extensions import connection, cursor
 from tqdm import tqdm
 
 from common import copy_user_data_dir, load_failed_knives_csv, log_failed_knives
 from CustomLogger import CustomLogger
-from db_operations import (
+from DB.Postgres.config_postgres import (
+    DATABASE_PASSWORD,
+    DATABASE_PORT,
+    DATABASE_USERNAME,
+)
+from DB.Postgres.db_operations_postgres import (
     add_new_knives_to_db,
+    check_if_knife_id_is_correct,
     connect_to_db,
     connect_to_db_threaded,
     get_and_save_historical_pricing_helper,
@@ -42,7 +46,7 @@ def navigate_and_wait(page: Page, url: str, wait_time: int, retries: int = 3) ->
                 '//span[@class="market_listing_item_name"]',
                 timeout=wait_time * 1000,
             )
-            return True  # success
+            return True
         except TimeoutError:
             print(f"Timeout loading {url}, retry {i + 1}/{retries}")
             time.sleep(5)
@@ -59,10 +63,9 @@ def get_knife_list(page: Page, wait_time: int) -> Set[str]:
     knife_name_set = set()
 
     if not navigate_and_wait(page, base_url.format(range_start + 1), wait_time):
-        return knife_name_set  # return empty set if first page fails
+        return knife_name_set
 
     soup = BeautifulSoup(page.content(), "html.parser")
-
     number_of_pages_span = soup.find("span", id="searchResults_links")
     if number_of_pages_span:
         page_links = number_of_pages_span.find_all(
@@ -73,19 +76,10 @@ def get_knife_list(page: Page, wait_time: int) -> Set[str]:
             try:
                 number_of_pages = int(last_page_text)
             except ValueError:
-                print(
-                    f"Could not parse number of pages from '{last_page_text}'. Defaulting to {DEFAULT_NUMBER_OF_PAGES}."
-                )
                 number_of_pages = DEFAULT_NUMBER_OF_PAGES
         else:
-            print(
-                f"Could not find page links. Defaulting to {DEFAULT_NUMBER_OF_PAGES}."
-            )
             number_of_pages = DEFAULT_NUMBER_OF_PAGES
     else:
-        print(
-            f"Could not find search results links. Defaulting to {DEFAULT_NUMBER_OF_PAGES}."
-        )
         number_of_pages = DEFAULT_NUMBER_OF_PAGES
 
     names = soup.find_all("span", class_="market_listing_item_name")
@@ -95,7 +89,7 @@ def get_knife_list(page: Page, wait_time: int) -> Set[str]:
 
     for page_num in tqdm(range(range_start + 2, number_of_pages + 1)):
         if not navigate_and_wait(page, base_url.format(page_num), wait_time):
-            continue  # skip to next page if navigation fails
+            continue
 
         soup = BeautifulSoup(page.content(), "html.parser")
         names = soup.find_all("span", class_="market_listing_item_name")
@@ -135,7 +129,8 @@ def extract_knife_data(page: Page, url: str, wait_time: int) -> ExtractedData:
     page.goto(url)
     # page.evaluate("window.scrollTo(0, 1000);")
 
-    # We have a bit of a catch 22 here where we wait for the elements that may not exist, but checking for the other element which shows the fact that they dont exist takes the same amount of time
+    # We have a bit of a catch 22 here
+    # where we wait for the elements that may not exist, but checking for the other element which shows the fact that they dont exist takes the same amount of time
     try:
         page.wait_for_selector(
             '//div[@id="market_commodity_buyrequests"]',
@@ -242,8 +237,8 @@ def extract_knife_data_with_retry(
 
 def get_and_save_historical_pricing(
     page: Page,
-    cursor: MySQLCursor,
-    connection: MySQLConnection,
+    cursor: cursor,
+    connection: connection,
     knife_id: int,
     name: str,
     logger: CustomLogger,
@@ -319,8 +314,8 @@ def get_and_save_historical_pricing(
 def get_knife_info(
     name: str,
     page: Page,
-    cursor: MySQLCursor,
-    connection: MySQLConnection,
+    cursor: cursor,
+    connection: connection,
     wait_time: int,
     logger: CustomLogger,
 ) -> Optional[Knife]:
@@ -425,16 +420,16 @@ def get_knife_info(
         if match:
             knife_id = match.group(1)
 
-    # if knife_id:
-    #    print("--------------")
-    #    print(knife_id, name)
-    #    print("++++++++++++++")
-    #    cursor.execute("UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s", (knife_id, name)) # Stupid HACK
-    #    connection.commit()
-
     if knife_id is None:
         return None
     knife_id = int(knife_id)
+    if not check_if_knife_id_is_correct(cursor, knife_id, name):
+        cursor.execute(
+            "UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s",
+            (knife_id, name),
+        )
+        connection.commit()
+
     last_min_price_with_fee, last_sold = get_and_save_historical_pricing(
         page, cursor, connection, knife_id, name, logger
     )
@@ -465,8 +460,8 @@ def get_knife_info(
 def safe_get_knife_info(
     name: Tuple[str],
     page: Page,
-    cursor: MySQLCursor,
-    connection: MySQLConnection,
+    cursor: cursor,
+    connection: connection,
     wait_time: int,
     logger: CustomLogger,
 ) -> Optional[Knife]:
@@ -515,12 +510,12 @@ def fetch_all_knives_for_thread(
 
     with sync_playwright() as p:
         connection, cursor = connect_to_db_threaded(
-            host="localhost",
-            database="knives",
-            port=3306,
-            user="root",
-            password="",
-            logger=logger,
+            "localhost",
+            "knives",
+            DATABASE_PORT,
+            DATABASE_USERNAME,
+            DATABASE_PASSWORD,
+            logger,
         )
         # Initialize the driver once per thread
         user_data_dir = initialize_directory(logger)
@@ -536,9 +531,6 @@ def fetch_all_knives_for_thread(
         page.route("**/*", route_intercept)
         thread_resources.page = page
         for knife_name in knife_names:
-            if shutdown_event.is_set():
-                logger.info("Shutdown signal received. Exiting thread...")
-                break
             knife_info = safe_get_knife_info(
                 knife_name, page, cursor, connection, wait_time, logger
             )
@@ -559,7 +551,7 @@ def fetch_all_knives_for_thread(
 
     if failed_knives:
         log_failed_knives(failed_knives, failed_knives_name, logger)
-    browser.close()  # Quit the driver after all knives in this thread are processed
+    # browser.close()  # Quit the driver after all knives in this thread are processed
     shutil.rmtree(user_data_dir)
     connection.close()
     cursor.close()
@@ -597,8 +589,7 @@ def process_knives(
         ]
         try:
             for future in as_completed(futures):
-                if shutdown_event.is_set():
-                    break
+                future.result()
         except KeyboardInterrupt:
             print("\nKeyboardInterrupt received. Cancelling tasks...")
             for future in futures:
@@ -614,7 +605,12 @@ def update_all_knife_data(
     wait_time: int = 6,
 ):
     sql_connection, sql_cursor = connect_to_db(
-        "localhost", "knives", 3306, "root", "", logger
+        "localhost",
+        "knives",
+        DATABASE_PORT,
+        DATABASE_USERNAME,
+        DATABASE_PASSWORD,
+        logger,
     )
 
     knife_names = get_knife_list_from_db(sql_cursor, date)
@@ -639,22 +635,6 @@ def update_all_knife_data(
     sql_connection.close()
 
 
-def graceful_shutdown(signal_received, frame, sql_cursor, sql_connection):
-    # Close database connections
-    if sql_cursor:
-        print("closing sql_cursor")
-        sql_cursor.close()
-    if sql_connection:
-        print("closing sql_connection")
-        sql_connection.close()
-    print("closed sql_connection")
-    os._exit(0)
-
-
-shutdown_event = threading.Event()
-thread_resources = threading.local()
-
-
 def route_intercept(route):
     if route.request.resource_type == "image":
         # print(f"Blocking the image request to: {route.request.url}")
@@ -671,7 +651,6 @@ def route_intercept(route):
     # if route.request.resource_type == "xhr":
     #    print(f"Blocking the xhr request to: {route.request.url}")
     #    return route.abort()
-
     return route.continue_()
 
 
@@ -694,6 +673,8 @@ def steam_login():
         browser.close()
 
 
+thread_resources = threading.local()
+
 if __name__ == "__main__":
     logger = CustomLogger("knives_playwright.log")
     MAX_FAILED_KNIVES = 10
@@ -706,7 +687,14 @@ if __name__ == "__main__":
     # browser = p.chromium.launch_persistent_context(user_data_dir=initialize_directory(logger), headless=False) # Headless True doesnt transfer the log in state properly
     # page = browser.new_page()
     # page.route("**/*", route_intercept)
-    # sql_connection, sql_cursor = connect_to_db('localhost', 'knives', 3306, 'root', '', logger)
+    sql_connection, sql_cursor = connect_to_db(
+        "localhost",
+        "knives",
+        DATABASE_PORT,
+        DATABASE_USERNAME,
+        DATABASE_PASSWORD,
+        logger,
+    )
     # knife = safe_get_knife_info("★ StatTrak™ Bowie Knife | Freehand (Minimal Wear)", page, sql_cursor, sql_connection, 6, logger)
     # print(knife)
     # save_knives_to_db([knife], sql_cursor, sql_connection)
