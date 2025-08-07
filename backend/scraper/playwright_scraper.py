@@ -125,12 +125,9 @@ def extract_knife_data(
         logger.warning(f"Timeout loading {url}.")
         return None
 
-    soup = BeautifulSoup(page.content(), "html.parser")
-    message_div = soup.find("div", id="message") or soup.find(
-        "div", class_="market_listing_table_message"
+    img_src = page.locator(".market_listing_largeimage img").get_attribute(
+        "src", timeout=1000
     )
-    h3_tag = message_div.find("h3") if isinstance(message_div, Tag) else None
-    message = h3_tag.text.strip() if h3_tag else ""
 
     buy_orders_elements = page.query_selector_all(
         ".market_commodity_orders_header_promote"
@@ -142,14 +139,9 @@ def extract_knife_data(
     )
     prices = [element.inner_text() for element in price_elements]
 
-    img_src = page.locator(".market_listing_largeimage img").get_attribute(
-        "src", timeout=1000
-    )
-
     return {
         "buy_orders": buy_orders_text,
         "current_min_price_with_fee": prices,
-        "message": [message],
         "knife_image": [img_src] if img_src else [],
     }
 
@@ -162,12 +154,7 @@ def extract_knife_data_with_retry(
     """
     for i in range(retries):
         data = extract_knife_data(page, url, wait_time, logger)
-        message = data.get("message", "")[0] if data else ""
-        if isinstance(message, list):
-            message_str = message[0].text
-        else:
-            message_str = str(message)
-        if data and "too many requests" not in message_str.lower():
+        if data:
             return data
         logger.warning(
             f"Attempt {i + 1} failed for {url}. Retrying in {i * 2 + 2} seconds."
@@ -304,14 +291,8 @@ def get_knife_info(
         logger.warning(f"Could not extract data for {name}.")
         return None
 
-    # Check for rate limiting or other messages
     message = data.get("message")
     if isinstance(message, str):
-        if "made too many requests" in message:
-            logger.fatal(
-                f"Too many requests for {name}, stopping... Message: {message}"
-            )
-            exit(1)
         current_price = "no listings" not in message
     elif message and hasattr(message[0], "text"):
         current_price = "no listings" not in message[0].text
