@@ -26,7 +26,7 @@ def log_failed_knives(
         logger.error(f"An error occurred: {e}")
 
 
-def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> List[Tuple[str]]:
+def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> List[str]:
     """
     Load a CSV file into a set.
 

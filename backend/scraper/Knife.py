@@ -14,6 +14,7 @@ class Knife:
         buy_order_price: Optional[float],
         knife_image: Optional[str] = None,
         last_sold: Optional[datetime] = None,
+        last_updated: Optional[datetime] = None,
     ):
         self.knife_name = knife_name
         self.knife_id = knife_id
@@ -22,7 +23,7 @@ class Knife:
         self.last_min_price_with_fee = last_min_price_with_fee
         self.last_min_price_without_fee = last_min_price_without_fee
         self.buy_order_price = buy_order_price
-        self.last_updated = datetime.now()
+        self.last_updated = last_updated
         self.last_sold = last_sold
         self.knife_image = knife_image
 

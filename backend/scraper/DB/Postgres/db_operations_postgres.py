@@ -83,7 +83,7 @@ def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> Non
             knife.last_min_price_with_fee,
             knife.last_min_price_without_fee,
             knife.buy_order_price,
-            knife.last_updated,
+            datetime.now(),
             knife.last_sold,
             knife.knife_image,
             knife.knife_name,
@@ -130,6 +130,8 @@ def get_knife_from_db(cur: cursor, name: str) -> Optional[Knife]:
             last_min_price_with_fee=row[4],
             last_min_price_without_fee=row[5],
             buy_order_price=row[6],
+            knife_image=row[13] if len(row) > 13 else None,
+            last_updated=row[8] if len(row) > 8 else None,
             last_sold=row[9] if len(row) > 9 else None,
         )
         return knife
