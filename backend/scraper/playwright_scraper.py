@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bs4 import BeautifulSoup
@@ -413,7 +414,7 @@ def initialize_directory(logger: CustomLogger) -> str:
 
 
 def fetch_all_knives_for_thread(
-    knife_names: List[Tuple[str]],
+    knife_queue: Queue,
     wait_time: int,
     progress_bar: tqdm,
     logger: CustomLogger,
@@ -443,7 +444,12 @@ def fetch_all_knives_for_thread(
             page = browser.new_page()
             page.route("**/*", route_intercept)
 
-            for knife_name in knife_names:
+            while True:
+                try:
+                    knife_name = knife_queue.get_nowait()
+                except Empty:
+                    break
+
                 knife_info = safe_get_knife_info(
                     knife_name, page, cursor, connection, wait_time, logger
                 )
@@ -483,10 +489,9 @@ def process_knives(
     """
     Processes a list of knife names using a thread pool.
     """
-    chunk_size = (len(knife_names) + THREAD_COUNT - 1) // THREAD_COUNT
-    knife_name_chunks = [
-        knife_names[i : i + chunk_size] for i in range(0, len(knife_names), chunk_size)
-    ]
+    knife_queue = Queue()
+    for name in knife_names:
+        knife_queue.put(name)
 
     total_knives = len(knife_names)
     progress_bar = tqdm(total=total_knives, desc="Processing knives", unit="knife")
@@ -495,13 +500,13 @@ def process_knives(
         futures = [
             executor.submit(
                 fetch_all_knives_for_thread,
-                chunk,
+                knife_queue,
                 wait_time,
                 progress_bar,
                 logger,
                 failed_knives_name,
             )
-            for chunk in knife_name_chunks
+            for _ in range(THREAD_COUNT)
         ]
         try:
             for future in as_completed(futures):
@@ -542,8 +547,6 @@ def update_all_knife_data(
         logger, [(name,) for name in knife_names], failed_knives_name, wait_time
     )
     update_all(sql_cursor)
-
-    failed_knives = load_failed_knives_csv(failed_knives_name, logger)
     retries = 0
     while retries < MAX_RETRY_COUNT and len(failed_knives) > MAX_FAILED_KNIVES:
         failed_knives = load_failed_knives_csv(failed_knives_name, logger)
@@ -556,6 +559,7 @@ def update_all_knife_data(
             logger, [(name,) for name in failed_knives], failed_knives_name, wait_time
         )
         update_all(sql_cursor)
+        retries += 1
 
     sql_cursor.close()
     sql_connection.close()
