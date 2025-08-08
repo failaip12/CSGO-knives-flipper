@@ -389,16 +389,20 @@ async def safe_get_knife_info(
     wait_time: int,
     logger: CustomLogger,
     semaphore: asyncio.Semaphore,
-) -> Optional[Knife]:
-    """A wrapper that catches and logs errors for get_knife_info."""
+) -> Tuple[str, Optional[Knife]]:
+    """
+    A wrapper that catches and logs errors for get_knife_info.
+    Returns the knife name along with the result.
+    """
     async with semaphore:
         try:
-            return await get_knife_info(
+            knife = await get_knife_info(
                 name, browser, cursor, connection, wait_time, logger
             )
+            return name, knife
         except Exception as e:
             logger.error(f"Error processing knife {name}: {e}")
-            return None
+            return name, None
 
 
 async def process_knives_parallel(
@@ -439,22 +443,24 @@ async def process_knives_parallel(
         for future in tqdm(
             asyncio.as_completed(tasks), total=len(tasks), desc="Processing knives"
         ):
-            result = await future
+            name, result = await future
             if result:
                 results.append(result)
             else:
-                # The name is not directly available here, would need to refactor to get it
-                pass
+                failed_knives.append(name)
 
             if len(results) >= BATCH_SIZE:
                 save_knives_to_db(results, sql_cursor, sql_connection)
                 results.clear()
 
+            if len(failed_knives) >= FAIL_BATCH_SIZE:
+                log_failed_knives(failed_knives, failed_knives_name, logger)
+                failed_knives.clear()
+
         if results:
             save_knives_to_db(results, sql_cursor, sql_connection)
-
-        # This part needs adjustment as we don't have the failed knife names directly
-        # log_failed_knives(failed_knives, failed_knives_name, logger)
+        if failed_knives:
+            log_failed_knives(failed_knives, failed_knives_name, logger)
 
         await browser.close()
         sql_cursor.close()
@@ -551,7 +557,7 @@ async def main():
 
         print(get_knife_from_db(sql_cursor, "★ Bayonet | Boreal Forest (Factory New)"))
 
-        knife = await safe_get_knife_info(
+        name, knife = await safe_get_knife_info(
             "★ Bayonet | Boreal Forest (Factory New)",
             browser,
             sql_cursor,
@@ -564,7 +570,7 @@ async def main():
         if knife:
             save_knives_to_db([knife], sql_cursor, sql_connection)
         else:
-            print("Knife not found or could not be processed.")
+            print(f"Knife {name} not found or could not be processed.")
         await browser.close()
 
     sql_cursor.close()
