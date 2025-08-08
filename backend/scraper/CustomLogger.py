@@ -85,7 +85,7 @@ class CustomLogger:
         formatted_message = self._get_formatted_message(level, message)
 
         # Print to console
-        print(formatted_message)
+        print(formatted_message.encode("utf-8", "replace").decode())
 
         # Write to file with UTF-8 encoding (appending)
         with open(self.log_file, "a", encoding="utf-8") as file:

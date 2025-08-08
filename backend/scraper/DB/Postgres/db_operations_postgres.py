@@ -14,7 +14,7 @@ def add_new_knives_to_db(names: Set[str], cur: cursor, conn: connection) -> None
         cur.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
         if cur.fetchone() is None:
             cur.execute(
-                "INSERT INTO knives (knife_name) VALUES (%s) ON CONFLICT (knife_name) DO NOTHING",
+                "INSERT INTO knives (knife_name) VALUES (%s)",
                 (name,),
             )
             conn.commit()

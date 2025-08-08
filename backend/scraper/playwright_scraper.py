@@ -42,7 +42,7 @@ ExtractedData = Dict[str, List[Any]]
 DEFAULT_NUMBER_OF_PAGES = 200
 MAX_RETRY_COUNT = 5
 MAX_FAILED_KNIVES = 10
-CONCURRENCY_LIMIT = 10  # Limit concurrent requests to avoid being blocked
+CONCURRENCY_LIMIT = 10
 WAIT_TIME = 6
 FAIL_BATCH_SIZE = 15
 BATCH_SIZE = 15
@@ -66,9 +66,11 @@ async def navigate_and_wait(
     return False
 
 
-async def get_knife_list(page: Page, wait_time: int, logger: CustomLogger) -> Set[str]:
+async def get_knife_list(
+    page: Page, wait_time: int, logger: CustomLogger, context: BrowserContext
+) -> Set[str]:
     """
-    Fetches the list of all knife names from the Steam market.
+    Fetches the list of all knife names from the Steam market in parallel.
     """
     base_url = "https://steamcommunity.com/market/search?q=&category_730_ItemSet[]=any&category_730_ProPlayer[]=any&category_730_StickerCapsule[]=any&category_730_TournamentTeam[]=any&category_730_Weapon[]=any&category_730_Type[]=tag_CSGO_Type_Knife&appid=730#p{}_name_asc"
     knife_name_set = set()
@@ -94,23 +96,48 @@ async def get_knife_list(page: Page, wait_time: int, logger: CustomLogger) -> Se
                     f"Could not parse the number of pages, defaulting to {DEFAULT_NUMBER_OF_PAGES}."
                 )
 
-    for page_num in tqdm(range(1, number_of_pages + 1), desc="Scraping knife list"):
-        if page_num > 1 and not await navigate_and_wait(
+    tasks = [
+        get_knife_names_from_page(context, page_num, wait_time, logger)
+        for page_num in range(1, number_of_pages + 1)
+    ]
+    results = await asyncio.gather(*tasks)
+
+    for result in results:
+        knife_name_set.update(result)
+
+    return knife_name_set
+
+
+async def get_knife_names_from_page(
+    context: BrowserContext, page_num: int, wait_time: int, logger: CustomLogger
+) -> Set[str]:
+    """
+    Fetches knife names from a single page of the Steam market.
+    """
+    base_url = "https://steamcommunity.com/market/search?q=&category_730_ItemSet[]=any&category_730_ProPlayer[]=any&category_730_StickerCapsule[]=any&category_730_TournamentTeam[]=any&category_730_Weapon[]=any&category_730_Type[]=tag_CSGO_Type_Knife&appid=730#p{}_name_asc"
+    page = await context.new_page()
+    await page.route("**/*", route_intercept)
+    knife_name_set = set()
+    try:
+        if not await navigate_and_wait(
             page, base_url.format(page_num), wait_time, logger
         ):
             logger.warning(f"Failed to load page {page_num}, skipping.")
-            continue
+            return knife_name_set
+
         await page.wait_for_timeout(1000)
         soup = BeautifulSoup(await page.content(), "html.parser")
         names = soup.find_all("span", class_="market_listing_item_name")
         if not names:
             logger.warning(f"No knife names found on page {page_num}.")
-            continue
+            return knife_name_set
 
         for name in names:
             knife_name_set.add(name.text.strip())
-
+    finally:
+        await page.close()
     return knife_name_set
+
 
 
 async def extract_knife_data(
@@ -557,11 +584,11 @@ async def main():
         page = await browser.new_page()
         await page.route("**/*", route_intercept)
 
-        # knife_list = await get_knife_list(page, 6, logger)
-        # print(f"Total knives found: {len(knife_list)}")
-        # add_new_knives_to_db(knife_list, sql_cursor, sql_connection)
+        knife_list = await get_knife_list(page, 6, logger, browser)
+        print(f"Total knives found: {len(knife_list)}")
+        add_new_knives_to_db(knife_list, sql_cursor, sql_connection)
 
-        print(get_knife_from_db(sql_cursor, "★ Bayonet | Boreal Forest (Factory New)"))
+        # print(get_knife_from_db(sql_cursor, "★ Bayonet | Boreal Forest (Factory New)"))
 
         name, knife = await safe_get_knife_info(
             "★ Bayonet | Boreal Forest (Factory New)",
@@ -589,4 +616,4 @@ async def main2():
 
 
 if __name__ == "__main__":
-    asyncio.run(main2())
+    asyncio.run(main())
