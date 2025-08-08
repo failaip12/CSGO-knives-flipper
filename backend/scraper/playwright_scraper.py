@@ -125,10 +125,14 @@ async def extract_knife_data(
     except TimeoutError:
         logger.warning(f"Timeout loading {url}.")
         return None
-
-    img_src = await page.locator(".market_listing_largeimage img").get_attribute(
-        "src", timeout=1000
-    )
+    try:
+        img_src = await page.locator(".market_listing_largeimage img").get_attribute(
+            "src", timeout=1000
+        )
+    except TimeoutError:
+        logger.warning(f"Timeout getting image src for {url}.")
+        await asyncio.sleep(20)
+        return None
 
     buy_orders_elements = await page.query_selector_all(
         ".market_commodity_orders_header_promote"
@@ -507,8 +511,10 @@ async def update_all_knife_data(
 
     update_all(sql_cursor)
     retries = 0
+    failed_knives = load_failed_knives_csv(failed_knives_name, logger)
     while retries < MAX_RETRY_COUNT and len(failed_knives) > MAX_FAILED_KNIVES:
-        failed_knives = load_failed_knives_csv(failed_knives_name, logger)
+        if retries > 0:
+            failed_knives = load_failed_knives_csv(failed_knives_name, logger)
         os.rename(
             failed_knives_name,
             f"failed_knives_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
