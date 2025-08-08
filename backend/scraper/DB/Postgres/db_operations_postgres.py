@@ -9,7 +9,10 @@ from CustomLogger import CustomLogger
 from Knife import Knife
 
 
-def add_new_knives_to_db(names: Set[str], cur: cursor, conn: connection) -> None:
+def add_new_knives_to_db(
+    names: Set[str], cur: cursor, conn: connection, logger: CustomLogger
+) -> None:
+    count = 0
     for name in tqdm(names):
         cur.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
         if cur.fetchone() is None:
@@ -18,6 +21,8 @@ def add_new_knives_to_db(names: Set[str], cur: cursor, conn: connection) -> None
                 (name,),
             )
             conn.commit()
+            count += 1
+    logger.info(f"Added {count} new knives to the database.")
 
 
 def get_and_save_historical_pricing_helper(

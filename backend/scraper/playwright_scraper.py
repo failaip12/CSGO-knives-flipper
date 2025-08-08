@@ -61,13 +61,16 @@ async def navigate_and_wait(
             return True
         except TimeoutError:
             logger.warning(f"Timeout loading {url}, retry {i + 1}/{retries}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(i * 3 + 2)
     logger.warning(f"Failed to load {url} after {retries} retries.")
     return False
 
 
 async def get_knife_list(
-    page: Page, wait_time: int, logger: CustomLogger, context: BrowserContext
+    page: Page,
+    wait_time: int,
+    logger: CustomLogger,
+    context: BrowserContext,
 ) -> Set[str]:
     """
     Fetches the list of all knife names from the Steam market in parallel.
@@ -95,12 +98,22 @@ async def get_knife_list(
                 logger.warning(
                     f"Could not parse the number of pages, defaulting to {DEFAULT_NUMBER_OF_PAGES}."
                 )
+    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+
+    async def get_knife_names_from_page_wrapper(page_num):
+        async with semaphore:
+            return await get_knife_names_from_page(context, page_num, wait_time, logger)
 
     tasks = [
-        get_knife_names_from_page(context, page_num, wait_time, logger)
+        get_knife_names_from_page_wrapper(page_num)
         for page_num in range(1, number_of_pages + 1)
     ]
-    results = await asyncio.gather(*tasks)
+    results = []
+    for future in tqdm(
+        asyncio.as_completed(tasks), total=len(tasks), desc="Scraping knife list"
+    ):
+        result = await future
+        results.append(result)
 
     for result in results:
         knife_name_set.update(result)
@@ -109,7 +122,10 @@ async def get_knife_list(
 
 
 async def get_knife_names_from_page(
-    context: BrowserContext, page_num: int, wait_time: int, logger: CustomLogger
+    context: BrowserContext,
+    page_num: int,
+    wait_time: int,
+    logger: CustomLogger,
 ) -> Set[str]:
     """
     Fetches knife names from a single page of the Steam market.
@@ -137,7 +153,6 @@ async def get_knife_names_from_page(
     finally:
         await page.close()
     return knife_name_set
-
 
 
 async def extract_knife_data(
@@ -586,7 +601,7 @@ async def main():
 
         knife_list = await get_knife_list(page, 6, logger, browser)
         print(f"Total knives found: {len(knife_list)}")
-        add_new_knives_to_db(knife_list, sql_cursor, sql_connection)
+        add_new_knives_to_db(knife_list, sql_cursor, sql_connection, logger)
 
         # print(get_knife_from_db(sql_cursor, "★ Bayonet | Boreal Forest (Factory New)"))
 
