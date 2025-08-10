@@ -1,5 +1,5 @@
 fastapi[standard]
 sqlmodel
 mysql-connector-python
-psycopg2-binary
 steampy
+steamsignin
