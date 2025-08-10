@@ -552,6 +552,29 @@ def route_intercept(route):
     return route.continue_()
 
 
+def steam_login():
+    with sync_playwright() as p:
+        project_root = Path(
+            __file__
+        ).parent  # This will get the directory where this script is located
+
+        original_user_data_dir = (
+            project_root
+            / "playwright_cache"  # Relative path to 'playwright_cache' directory
+        )
+
+        browser = p.chromium.launch_persistent_context(
+            user_data_dir=original_user_data_dir, headless=False
+        )
+        page = browser.new_page()
+        page.goto("https://steamcommunity.com/login/home")
+
+        browser.storage_state(path="storage.json")
+
+        input("Press Enter after completing the login process...")
+        browser.close()
+
+
 if __name__ == "__main__":
     logger = CustomLogger("knives_playwright.log")
 
