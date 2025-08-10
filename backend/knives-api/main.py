@@ -1,5 +1,6 @@
 # py -m fastapi run .\main.py
 import os
+import sys
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI
@@ -11,8 +12,14 @@ from steampy.client import SteamClient
 
 from model import Knives
 
-# from ..scraper.DB.MySQL.config_mysql import DATABASE_URL
-from ..scraper.DB.Postgres.config_postgres import DATABASE_URL
+# Add the project root to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from scraper.DB.Postgres.config_postgres import DATABASE_URL  # noqa: E402
+
+# from scraper.DB.MySQL.config_mysql import DATABASE_URL
 
 app = FastAPI()
 app.add_middleware(
