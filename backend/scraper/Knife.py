@@ -1,12 +1,12 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 
 class Knife:
     def __init__(
         self,
         knife_name: str,
-        knife_id: Optional[str | Any],
+        knife_id: int,
         current_min_price_with_fee: Optional[float],
         current_min_price_without_fee: Optional[float],
         last_min_price_with_fee: Optional[float],

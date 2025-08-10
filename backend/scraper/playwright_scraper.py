@@ -28,11 +28,11 @@ from DB.Postgres.config_postgres import (
 )
 from DB.Postgres.db_operations_postgres import (
     add_new_knives_to_db,
-    check_if_knife_id_is_correct,
     connect_to_db,
     get_and_save_historical_pricing_helper,
     get_knife_from_db,
     get_knife_list_from_db,
+    get_knife_names_from_db,
     save_knives_to_db,
     update_all,
 )
@@ -365,7 +365,7 @@ async def _extract_knife_id(
 
 
 async def get_knife_info(
-    name: str,
+    knife_data: Knife,
     browser: BrowserContext,
     cursor: cursor,
     connection: connection,
@@ -375,14 +375,14 @@ async def get_knife_info(
     """
     Fetches and processes all data for a single knife from its Steam market page.
     """
-    url = f"https://steamcommunity.com/market/listings/730/{name}"
+    url = f"https://steamcommunity.com/market/listings/730/{knife_data.knife_name}"
     page = await browser.new_page()
     await page.route("**/*", route_intercept)
 
     try:
         data = await extract_knife_data_with_retry(page, url, wait_time, logger)
         if not data:
-            logger.warning(f"Could not extract data for {name}.")
+            logger.warning(f"Could not extract data for {knife_data.knife_name}.")
             return None
 
         message = data.get("message")
@@ -397,11 +397,11 @@ async def get_knife_info(
         buy_orders_list = data.get("buy_orders")
         buy_orders = buy_orders_list and len(buy_orders_list) >= 2
         if not buy_orders:
-            logger.warning(f"No buy orders found for {name}")
+            logger.warning(f"No buy orders found for {knife_data.knife_name}")
 
         current_min_price_with_fee_list = data.get("current_min_price_with_fee")
         if not current_min_price_with_fee_list:
-            logger.info(f"No current price for {name}")
+            logger.info(f"No current price for {knife_data.knife_name}")
             current_price = False
 
         current_min_price_with_fee = (
@@ -424,25 +424,30 @@ async def get_knife_info(
             knife_image = knife_image[0] if knife_image else None
 
         # Extract and verify knife_id
-        knife_id = await _extract_knife_id(page, wait_time, logger, name)
-        if not knife_id:
-            logger.error(f"Could not find knife_id for {name}.")
-            return None
+        knife_id = knife_data.knife_id
+        if knife_id < 10000:
+            knife_id = await _extract_knife_id(
+                page, wait_time, logger, knife_data.knife_name
+            )
+            if not knife_id:
+                logger.error(f"Could not find knife_id for {knife_data.knife_name}.")
+                return None
 
-        if not check_if_knife_id_is_correct(cursor, knife_id, name):
             cursor.execute(
                 "UPDATE knives SET knife_id = %s WHERE knives.knife_name = %s",
-                (knife_id, name),
+                (knife_id, knife_data.knife_name),
             )
             connection.commit()
-            logger.info(f"Updated knife_id for {name} to {knife_id}.")
+            logger.info(f"Updated knife_id for {knife_data.knife_name} to {knife_id}.")
 
         # Get historical pricing data
         last_min_price_with_fee, last_sold = await get_and_save_historical_pricing(
-            page, cursor, connection, knife_id, name, logger
+            page, cursor, connection, knife_id, knife_data.knife_name, logger
         )
         if not last_min_price_with_fee or not last_sold:
-            logger.warning(f"Could not process price history for {name}")
+            logger.warning(
+                f"Could not process price history for {knife_data.knife_name}"
+            )
         # Calculate derived prices
         last_min_price_without_fee = (
             float(last_min_price_with_fee) / 1.15 if last_min_price_with_fee else None
@@ -453,7 +458,7 @@ async def get_knife_info(
             else None
         )
         return Knife(
-            name,
+            knife_data.knife_name,
             knife_id,
             current_min_price_with_fee,
             current_min_price_without_fee,
@@ -469,7 +474,7 @@ async def get_knife_info(
 
 
 async def safe_get_knife_info(
-    name: str,
+    knife_data: Knife,
     browser: BrowserContext,
     cursor: cursor,
     connection: connection,
@@ -484,22 +489,22 @@ async def safe_get_knife_info(
     async with semaphore:
         try:
             knife = await get_knife_info(
-                name, browser, cursor, connection, wait_time, logger
+                knife_data, browser, cursor, connection, wait_time, logger
             )
-            return name, knife
+            return knife_data.knife_name, knife
         except Exception as e:
-            logger.error(f"Error processing knife {name}: {e}")
-            return name, None
+            logger.error(f"Error processing knife {knife_data.knife_name}: {e}")
+            return knife_data.knife_name, None
 
 
 async def process_knives_parallel(
     logger: CustomLogger,
-    knife_names: List[str],
+    knives: List[Knife],
     failed_knives_name: str,
     wait_time: int = WAIT_TIME,
 ):
     """
-    Processes a list of knife names asynchronously.
+    Processes a list of knives asynchronously.
     """
     user_data_dir = initialize_directory(logger)
     sql_connection, sql_cursor = connect_to_db(
@@ -519,9 +524,9 @@ async def process_knives_parallel(
 
         tasks = [
             safe_get_knife_info(
-                name, browser, sql_cursor, sql_connection, wait_time, logger, semaphore
+                knife, browser, sql_cursor, sql_connection, wait_time, logger, semaphore
             )
-            for name in knife_names
+            for knife in knives
         ]
 
         results = []
@@ -580,17 +585,19 @@ async def update_all_knife_data(
         logger,
     )
 
-    failed_knives = load_failed_knives_csv(failed_knives_name, logger)
-    if len(failed_knives) > MAX_FAILED_KNIVES:
-        knife_names = failed_knives
+    failed_knives_names = load_failed_knives_csv(failed_knives_name, logger)
+    if len(failed_knives_names) > MAX_FAILED_KNIVES:
+        knives = []
+        for knife_name in failed_knives_names:
+            knives.append(get_knife_from_db(sql_cursor, knife_name))
         os.rename(
             failed_knives_name,
             f"failed_knives_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         )
     else:
-        knife_names = get_knife_list_from_db(sql_cursor, date)
+        knives = get_knife_list_from_db(sql_cursor, date)
 
-    await process_knives_parallel(logger, knife_names, failed_knives_name, wait_time)
+    await process_knives_parallel(logger, knives, failed_knives_name, wait_time)
 
     update_all(sql_cursor)
     retries = 0
@@ -604,14 +611,15 @@ async def update_all_knife_data(
             except asyncio.TimeoutError:
                 pass
             failed_knives = load_failed_knives_csv(failed_knives_name, logger)
+            knives = []
+            for knife_name in failed_knives_names:
+                knives.append(get_knife_from_db(sql_cursor, knife_name))
         os.rename(
             failed_knives_name,
             f"failed_knives_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         )
         logger.info(f"Reprocessing {len(failed_knives)} failed knives.")
-        await process_knives_parallel(
-            logger, failed_knives, failed_knives_name, wait_time
-        )
+        await process_knives_parallel(logger, knives, failed_knives_name, wait_time)
         update_all(sql_cursor)
         retries += 1
 

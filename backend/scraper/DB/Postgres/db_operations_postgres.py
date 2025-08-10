@@ -100,27 +100,45 @@ def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> Non
     conn.commit()
 
 
-def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> List[str]:
+def get_knife_names_from_db(
+    cur: cursor, limit: Optional[int] = None, date: Optional[str] = None
+) -> List[str]:
     if date is None:
         select_query = (
             "SELECT knife_name FROM knives ORDER BY last_updated ASC NULLS FIRST"
         )
     else:
         select_query = "SELECT knife_name FROM knives WHERE last_updated < %s ORDER BY last_updated ASC NULLS FIRST"
-
-    cur.execute(select_query, (date,) if date else None)
+    if limit is not None:
+        select_query += " LIMIT %s"
+    cur.execute(select_query, (date, limit) if date else (limit,))
     knife_list = [name[0] for name in cur.fetchall()]
     return knife_list
 
 
-def check_if_knife_id_is_correct(cur: cursor, knife_id: int, knife_name: str) -> bool:
-    cur.execute("SELECT knife_id FROM knives WHERE knife_name = %s", (knife_name,))
-    row = cur.fetchone()
-    if row:
-        knife_id_db = row[0]
-        return knife_id_db == knife_id
+def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> List[Knife]:
+    if date is None:
+        select_query = "SELECT * FROM knives ORDER BY last_updated ASC NULLS FIRST"
     else:
-        return False
+        select_query = "SELECT * FROM knives WHERE last_updated < %s ORDER BY last_updated ASC NULLS FIRST"
+
+    cur.execute(select_query, (date,) if date else None)
+    knife_list = []
+    for row in cur.fetchall():
+        knife = Knife(
+            knife_id=row[0],
+            knife_name=str(row[1]),
+            current_min_price_with_fee=row[2],
+            current_min_price_without_fee=row[3],
+            last_min_price_with_fee=row[4],
+            last_min_price_without_fee=row[5],
+            buy_order_price=row[6],
+            knife_image=row[13] if len(row) > 13 else None,
+            last_updated=row[8] if len(row) > 8 else None,
+            last_sold=row[9] if len(row) > 9 else None,
+        )
+        knife_list.append(knife)
+    return knife_list
 
 
 def get_knife_from_db(cur: cursor, name: str) -> Optional[Knife]:
