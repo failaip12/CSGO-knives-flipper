@@ -15,6 +15,7 @@ from playwright.async_api import (
     TimeoutError,
     async_playwright,
 )
+from playwright.sync_api import sync_playwright
 from psycopg2.extensions import connection, cursor
 from tqdm import tqdm
 
@@ -98,25 +99,58 @@ async def get_knife_list(
                 logger.warning(
                     f"Could not parse the number of pages, defaulting to {DEFAULT_NUMBER_OF_PAGES}."
                 )
-    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
-    async def get_knife_names_from_page_wrapper(page_num):
-        async with semaphore:
-            return await get_knife_names_from_page(context, page_num, wait_time, logger)
+    pages_to_scrape = list(range(1, number_of_pages + 1))
+    retries = 0
 
-    tasks = [
-        get_knife_names_from_page_wrapper(page_num)
-        for page_num in range(1, number_of_pages + 1)
-    ]
-    results = []
-    for future in tqdm(
-        asyncio.as_completed(tasks), total=len(tasks), desc="Scraping knife list"
-    ):
-        result = await future
-        results.append(result)
+    while retries < MAX_RETRY_COUNT and pages_to_scrape:
+        if retries > 0:
+            logger.info(
+                f"Retrying {len(pages_to_scrape)} failed pages. Retry {retries}/{MAX_RETRY_COUNT}"
+            )
+            retry_event = asyncio.Event()
+            try:
+                # Using an event to wait, which can be triggered externally if needed.
+                await asyncio.wait_for(retry_event.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass  # Expected timeout, continuing with retry
 
-    for result in results:
-        knife_name_set.update(result)
+        semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+
+        async def get_knife_names_from_page_wrapper(page_num):
+            async with semaphore:
+                result = await get_knife_names_from_page(
+                    context, page_num, wait_time, logger
+                )
+                return page_num, result
+
+        tasks = [
+            get_knife_names_from_page_wrapper(page_num) for page_num in pages_to_scrape
+        ]
+        failed_pages_this_run = []
+
+        for future in tqdm(
+            asyncio.as_completed(tasks),
+            total=len(tasks),
+            desc=f"Scraping knife list (Attempt {retries + 1})",
+        ):
+            page_num, result = await future
+            if result is not None:
+                knife_name_set.update(result)
+            else:
+                failed_pages_this_run.append(page_num)
+
+        if not failed_pages_this_run:
+            logger.info("Successfully scraped all pages.")
+            break
+
+        pages_to_scrape = sorted(failed_pages_this_run)
+        retries += 1
+
+    if pages_to_scrape:
+        logger.error(
+            f"Failed to scrape {len(pages_to_scrape)} pages after {MAX_RETRY_COUNT} retries: {pages_to_scrape}"
+        )
 
     return knife_name_set
 
@@ -126,7 +160,7 @@ async def get_knife_names_from_page(
     page_num: int,
     wait_time: int,
     logger: CustomLogger,
-) -> Set[str]:
+) -> Optional[Set[str]]:
     """
     Fetches knife names from a single page of the Steam market.
     """
@@ -139,14 +173,16 @@ async def get_knife_names_from_page(
             page, base_url.format(page_num), wait_time, logger
         ):
             logger.warning(f"Failed to load page {page_num}, skipping.")
-            return knife_name_set
+            return None
 
         await page.wait_for_timeout(1000)
         soup = BeautifulSoup(await page.content(), "html.parser")
         names = soup.find_all("span", class_="market_listing_item_name")
-        if not names:
-            logger.warning(f"No knife names found on page {page_num}.")
-            return knife_name_set
+        if not names or len(names) < 5:
+            logger.warning(
+                f"Less than 5 knife names found on page {page_num}. Found {len(names)}."
+            )
+            return None
 
         for name in names:
             knife_name_set.add(name.text.strip())
@@ -203,10 +239,15 @@ async def extract_knife_data_with_retry(
         data = await extract_knife_data(page, url, wait_time, logger)
         if data:
             return data
+        wait_time = i * 2 + 2
         logger.warning(
-            f"Attempt {i + 1} failed for {url}. Retrying in {i * 2 + 2} seconds."
+            f"Attempt {i + 1} failed for {url}. Retrying in {wait_time} seconds."
         )
-        await asyncio.sleep(i * 2 + 2)
+        retry_event = asyncio.Event()
+        try:
+            await asyncio.wait_for(retry_event.wait(), timeout=wait_time)
+        except asyncio.TimeoutError:
+            pass
     logger.error(f"Failed to extract data for {url} after {retries} retries.")
     return None
 
@@ -556,6 +597,12 @@ async def update_all_knife_data(
     failed_knives = load_failed_knives_csv(failed_knives_name, logger)
     while retries < MAX_RETRY_COUNT and len(failed_knives) > MAX_FAILED_KNIVES:
         if retries > 0:
+            logger.info("Waiting for 5 seconds before retrying failed knives.")
+            retry_event = asyncio.Event()
+            try:
+                await asyncio.wait_for(retry_event.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
             failed_knives = load_failed_knives_csv(failed_knives_name, logger)
         os.rename(
             failed_knives_name,

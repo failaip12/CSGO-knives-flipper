@@ -13,13 +13,19 @@ from Knife import Knife
 
 
 def add_new_knives_to_db(
-    names: List[str], cursor: MySQLCursor, connection: MySQLConnection
+    names: List[str],
+    cursor: MySQLCursor,
+    connection: MySQLConnection,
+    logger: CustomLogger,
 ) -> None:
+    count = 0
     for name in tqdm(names):
         cursor.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
         if cursor.fetchone() is None:
             cursor.execute("INSERT INTO knives (knife_name) VALUES (%s)", (name,))
             connection.commit()
+            count += 1
+    logger.info(f"Added {count} new knives to the database.")
 
 
 # TODO: Optimize this b

@@ -4,7 +4,7 @@ import random
 import shutil
 import string
 import tempfile
-from typing import List, Tuple
+from typing import List
 
 from CustomLogger import CustomLogger
 
