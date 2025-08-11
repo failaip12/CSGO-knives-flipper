@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import re
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -19,7 +18,7 @@ from playwright.sync_api import sync_playwright
 from psycopg2.extensions import connection, cursor
 from tqdm import tqdm
 
-from common import copy_user_data_dir, load_failed_knives_csv, log_failed_knives
+from common import load_failed_knives_csv, log_failed_knives
 from CustomLogger import CustomLogger
 from DB.Postgres.config_postgres import (
     DATABASE_PASSWORD,
@@ -47,6 +46,7 @@ CONCURRENCY_LIMIT = 10
 WAIT_TIME = 6
 FAIL_BATCH_SIZE = 15
 BATCH_SIZE = 15
+STATE_PATH = "storage.json"
 
 
 async def navigate_and_wait(
@@ -506,7 +506,6 @@ async def process_knives_parallel(
     """
     Processes a list of knives asynchronously.
     """
-    user_data_dir = initialize_directory(logger)
     sql_connection, sql_cursor = connect_to_db(
         "localhost",
         "knives",
@@ -517,14 +516,19 @@ async def process_knives_parallel(
     )
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=user_data_dir, headless=False
-        )
+        browser = await p.chromium.launch()
+        if not Path(STATE_PATH).exists():
+            print("No storage state found. Please log in to Steam first.")
+            return
+        context = await browser.new_context(storage_state=STATE_PATH)
+        page = await context.new_page()
+        await page.route("**/*", route_intercept)
+
         semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         tasks = [
             safe_get_knife_info(
-                knife, browser, sql_cursor, sql_connection, wait_time, logger, semaphore
+                knife, context, sql_cursor, sql_connection, wait_time, logger, semaphore
             )
             for knife in knives
         ]
@@ -557,17 +561,6 @@ async def process_knives_parallel(
         await browser.close()
         sql_cursor.close()
         sql_connection.close()
-        shutil.rmtree(user_data_dir)
-
-
-def initialize_directory(logger: CustomLogger) -> str:
-    project_root = Path(__file__).parent
-    original_user_data_dir = project_root / "playwright_cache"
-    if not original_user_data_dir.exists():
-        raise FileNotFoundError(
-            f"User data directory {original_user_data_dir} does not exist."
-        )
-    return copy_user_data_dir(str(original_user_data_dir), logger, "playwright_cache")
 
 
 async def update_all_knife_data(
@@ -646,12 +639,12 @@ async def main():
     )
 
     async with async_playwright() as p:
-        project_root = Path(__file__).parent
-        original_user_data_dir = project_root / "playwright_cache"
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=original_user_data_dir, headless=False
-        )
-        page = await browser.new_page()
+        browser = await p.chromium.launch()
+        if not Path(STATE_PATH).exists():
+            print("No storage state found. Please log in to Steam first.")
+            return
+        context = await browser.new_context(storage_state=STATE_PATH)
+        page = await context.new_page()
         await page.route("**/*", route_intercept)
 
         knife_list = await get_knife_list(page, 6, logger, browser)
@@ -687,24 +680,14 @@ async def main2():
 
 def steam_login():
     with sync_playwright() as p:
-        project_root = Path(
-            __file__
-        ).parent  # This will get the directory where this script is located
-
-        original_user_data_dir = (
-            project_root
-            / "playwright_cache"  # Relative path to 'playwright_cache' directory
-        )
-
-        browser = p.chromium.launch_persistent_context(
-            user_data_dir=original_user_data_dir, headless=False
-        )
-        page = browser.new_page()
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context()
+        page = context.new_page()
         page.goto("https://steamcommunity.com/login/home")
 
-        browser.storage_state(path="storage.json")
-
         input("Press Enter after completing the login process...")
+
+        context.storage_state(path=STATE_PATH)
         browser.close()
 
 
