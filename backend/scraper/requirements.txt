@@ -7,3 +7,4 @@ selenium-wire-2
 tqdm
 beautifulsoup4
 playwright
+requests

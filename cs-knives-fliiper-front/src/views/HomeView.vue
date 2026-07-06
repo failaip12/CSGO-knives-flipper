@@ -186,7 +186,7 @@ onMounted(async () => {
             <tr v-for="knife in displayedKnives" :key="knife.knife_id">
               <td><img style="width: 5rem" :src="knife.knife_image" loading="lazy" /></td>
               <td>
-                <a :href="'https://steamcommunity.com/market/listings/730/' + knife.knife_name">{{
+                <a :href="'https://steamcommunity.com/market/listings/730/' + encodeURIComponent(knife.knife_name)">{{
                   knife.knife_name
                 }}</a>
               </td>
