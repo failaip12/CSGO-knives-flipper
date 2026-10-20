@@ -285,27 +285,10 @@ class KnifeUpdater:
         }
         with run_parallel(jobs, description) as finished:
             for key, future in finished:
-                try:
-                    results = future.result()
-                except SteamUnavailableError as e:
-                    if e.endpoint != "listings":
-                        raise
-                    # Knives that weren't updated yet get updated one by one instead.
-                    self.logger.error(f"{e} Updating the remaining knives one by one.")
-                    self.pages_unavailable = True
+                results = self._group_results(future, groups[key])
+                if self.pages_unavailable:
                     return {}
-                except FATAL_ERRORS:
-                    raise
-                except SteamDataError as e:
-                    self.logger.warning(
-                        f"Could not load knife group {groups[key]}: {e}"
-                    )
-                    failed_groups[key] = groups[key]
-                    continue
-                except Exception:
-                    self.logger.exception(
-                        f"Unexpected error while loading knife group {groups[key]}."
-                    )
+                if results is None:
                     failed_groups[key] = groups[key]
                     continue
                 for result in results:
@@ -314,6 +297,24 @@ class KnifeUpdater:
                     if not result.complete or not self.save(result):
                         incomplete[result.name] = result
         return failed_groups
+
+    def _group_results(self, future: Future, name: str) -> list[KnifeResult] | None:
+        """The knives of a loaded group, None if the group failed to load."""
+        try:
+            return future.result()
+        except SteamUnavailableError as e:
+            if e.endpoint != "listings":
+                raise
+            # Knives that weren't updated yet get updated one by one instead.
+            self.logger.error(f"{e} Updating the remaining knives one by one.")
+            self.pages_unavailable = True
+        except FATAL_ERRORS:
+            raise
+        except SteamDataError as e:
+            self.logger.warning(f"Could not load knife group {name}: {e}")
+        except Exception:
+            self.logger.exception(f"Unexpected error while loading knife group {name}.")
+        return None
 
     def process_knives(
         self,
