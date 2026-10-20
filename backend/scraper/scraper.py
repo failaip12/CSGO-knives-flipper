@@ -215,19 +215,20 @@ class KnifeUpdater:
     def save(self, result: KnifeResult) -> bool:
         """Writes a fully fetched knife to the database. Returns False if it should be retried."""
         try:
-            return self._save(result)
+            self._save(result)
         except Exception as e:
             self.logger.exception(f"Error while saving {result.name}.")
             result.error = f"Error while saving: {e!r}"
             self._recover_db()
             return False
+        return True
 
-    def _save(self, result: KnifeResult) -> bool:
+    def _save(self, result: KnifeResult) -> None:
         assert result.history is not None and result.order_book is not None
         knife = self.knives.get(result.name)
         if knife is None:
             if not self.discover:
-                return True
+                return
             knife_id = add_knife_to_db(result.name, self.cursor, self.connection)
             knife = Knife(result.name, knife_id, None, None, None, None, None)
             self.knives[result.name] = knife
@@ -267,7 +268,6 @@ class KnifeUpdater:
             self.images[result.name] = image
         if len(self.pending) >= BATCH_SIZE:
             self.flush()
-        return True
 
     def process_groups(
         self,
