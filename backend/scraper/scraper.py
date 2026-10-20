@@ -1,11 +1,12 @@
 import os
 import re
 import time
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Dict, Iterator, List, Mapping, Optional, Set, Tuple
+from typing import Optional
 
 import psycopg2
 from tqdm import tqdm
@@ -66,7 +67,7 @@ def knife_group_name(name: str) -> str:
     return WEAR_RE.sub("", name.replace("StatTrak™ ", ""))
 
 
-def unlisted_group_candidates(known_groups: Set[str]) -> List[str]:
+def unlisted_group_candidates(known_groups: set[str]) -> list[str]:
     """
     Knife skins that may exist but weren't found: every knife type combined with every
     finish seen on any knife type, plus every vanilla knife.
@@ -82,7 +83,7 @@ def unlisted_group_candidates(known_groups: Set[str]) -> List[str]:
     return sorted(candidates - known_groups)
 
 
-def group_variants(group: str) -> List[str]:
+def group_variants(group: str) -> list[str]:
     """Every name a knife of this skin can have: each wear with and without StatTrak."""
     names = [f"{group} ({wear})" for wear in WEARS] if " | " in group else [group]
     return names + [name.replace("★ ", "★ StatTrak™ ", 1) for name in names]
@@ -116,7 +117,7 @@ def complete_knife(client: SteamMarketClient, result: KnifeResult) -> KnifeResul
     return result
 
 
-def fetch_group(client: SteamMarketClient, key: str, name: str) -> List[KnifeResult]:
+def fetch_group(client: SteamMarketClient, key: str, name: str) -> list[KnifeResult]:
     group = client.get_knife_group(key, name)
     return [
         complete_knife(client, KnifeResult(item.name, item.image, item.history))
@@ -127,13 +128,13 @@ def fetch_group(client: SteamMarketClient, key: str, name: str) -> List[KnifeRes
 @contextmanager
 def run_parallel(
     jobs: Mapping[str, Callable[[], object]], description: str
-) -> Iterator[Iterator[Tuple[str, Future]]]:
+) -> Iterator[Iterator[tuple[str, Future]]]:
     """
     Runs the jobs in worker threads, the yielded iterator gives (job key, future) as they finish.
     Pending jobs are cancelled as soon as the caller leaves the with block.
     """
     executor = ThreadPoolExecutor(WORKERS)
-    futures: Dict[Future, str] = {
+    futures: dict[Future, str] = {
         executor.submit(job): key for key, job in jobs.items()
     }
     try:
@@ -152,18 +153,18 @@ class KnifeUpdater:
         self.logger = logger
         self.discover = discover
         self._connect()
-        self.knives: Dict[str, Knife] = {
+        self.knives: dict[str, Knife] = {
             knife.knife_name: knife for knife in get_knife_list_from_db(self.cursor)
         }
-        self.pending: List[Knife] = []
-        self.unsaved: Dict[str, KnifeResult] = {}
-        self.updated_names: Set[str] = set()
+        self.pending: list[Knife] = []
+        self.unsaved: dict[str, KnifeResult] = {}
+        self.updated_names: set[str] = set()
         self.updated = 0
         self.added = 0
         self.pages_unavailable = False
         # Group pages loaded this run, a knife missing from its page isn't on it at all.
-        self.loaded_groups: Set[str] = set()
-        self.images: Dict[str, str] = {
+        self.loaded_groups: set[str] = set()
+        self.images: dict[str, str] = {
             name: knife.knife_image
             for name, knife in self.knives.items()
             if knife.knife_image
@@ -272,11 +273,11 @@ class KnifeUpdater:
     def process_groups(
         self,
         client: SteamMarketClient,
-        groups: Dict[str, str],
-        seen: Set[str],
-        incomplete: Dict[str, KnifeResult],
+        groups: dict[str, str],
+        seen: set[str],
+        incomplete: dict[str, KnifeResult],
         description: str,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Updates every knife in the given groups. Returns the groups that failed to load."""
         failed_groups = {}
         jobs = {
@@ -312,9 +313,9 @@ class KnifeUpdater:
     def process_knives(
         self,
         client: SteamMarketClient,
-        knives: Dict[str, KnifeResult],
+        knives: dict[str, KnifeResult],
         description: str,
-    ) -> Dict[str, KnifeResult]:
+    ) -> dict[str, KnifeResult]:
         """Updates knives one by one. Returns the ones that still failed."""
         failed = {}
         jobs = {
@@ -338,9 +339,9 @@ class KnifeUpdater:
     def update_groups(
         self,
         client: SteamMarketClient,
-        groups: Dict[str, str],
-        seen: Set[str],
-        incomplete: Dict[str, KnifeResult],
+        groups: dict[str, str],
+        seen: set[str],
+        incomplete: dict[str, KnifeResult],
         description: str,
     ) -> None:
         for attempt in range(MAX_RETRY_COUNT + 1):
@@ -368,7 +369,7 @@ class KnifeUpdater:
         siblings.sort(key=lambda n: not (wear and n.endswith(wear.group(0))))
         return self.images[siblings[0]] if siblings else None
 
-    def find_missing_variants(self, client: SteamMarketClient) -> List[str]:
+    def find_missing_variants(self, client: SteamMarketClient) -> list[str]:
         """
         Group pages leave out some variants (e.g. a StatTrak wear that hasn't sold in years).
         Returns the names of such variants that Steam confirms exist.
@@ -399,8 +400,8 @@ class KnifeUpdater:
         return found
 
     def find_unlisted_groups(
-        self, client: SteamMarketClient, known_groups: Set[str]
-    ) -> Dict[str, str]:
+        self, client: SteamMarketClient, known_groups: set[str]
+    ) -> dict[str, str]:
         """
         Steam's search leaves out skins that have no listings at all right now. Returns
         {name of an existing variant: group name} for such skins. Loading the group page
@@ -409,7 +410,7 @@ class KnifeUpdater:
         candidates = unlisted_group_candidates(known_groups)
         if not candidates:
             return {}
-        found: Dict[str, str] = {}
+        found: dict[str, str] = {}
         jobs = {
             group: (lambda group=group: find_existing_variant(client, group))
             for group in candidates
@@ -432,7 +433,7 @@ class KnifeUpdater:
         )
         return found
 
-    def run(self, client: SteamMarketClient) -> Dict[str, KnifeResult]:
+    def run(self, client: SteamMarketClient) -> dict[str, KnifeResult]:
         try:
             groups = client.search_knife_groups()
             self.logger.info(f"Found {len(groups)} knife groups on the market.")
@@ -446,8 +447,8 @@ class KnifeUpdater:
             )
             groups = {}
 
-        seen: Set[str] = set()
-        incomplete: Dict[str, KnifeResult] = {}
+        seen: set[str] = set()
+        incomplete: dict[str, KnifeResult] = {}
         self.update_groups(client, groups, seen, incomplete, "Knife groups")
 
         if self.discover:
@@ -460,7 +461,7 @@ class KnifeUpdater:
         # Knives that weren't on the loaded group pages, because the search failed, their
         # group failed to load or they're not listed in the search anymore. A knife's own
         # page redirects to its group page, so one page per group is still enough.
-        known_groups: Dict[str, str] = {}
+        known_groups: dict[str, str] = {}
         for name in sorted(self.knives.keys() - seen):
             if knife_group_name(name) not in self.loaded_groups:
                 known_groups.setdefault(knife_group_name(name), name)
@@ -488,7 +489,7 @@ class KnifeUpdater:
             self.flush()
         return incomplete
 
-    def not_updated(self, reason: str) -> Dict[str, KnifeResult]:
+    def not_updated(self, reason: str) -> dict[str, KnifeResult]:
         return {
             name: KnifeResult(name, error=reason)
             for name in self.knives.keys() - self.updated_names
@@ -496,7 +497,7 @@ class KnifeUpdater:
 
     def finish(
         self,
-        failed: Dict[str, KnifeResult],
+        failed: dict[str, KnifeResult],
         failed_knives_file: str,
         stopped_early: bool,
     ) -> None:
@@ -534,7 +535,7 @@ def update_all_knife_data(
     """
     updater = KnifeUpdater(logger, discover)
     client = SteamMarketClient(logger)
-    failed: Dict[str, KnifeResult] = {}
+    failed: dict[str, KnifeResult] = {}
     stopped_early = True
     try:
         failed = updater.run(client)

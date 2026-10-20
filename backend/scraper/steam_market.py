@@ -5,7 +5,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import requests
 
@@ -41,7 +41,7 @@ MAX_INTERVAL = 30.0
 SPEED_UP_AFTER = 10
 
 # (sell time in UTC, median price with fee in EUR, amount sold)
-PriceHistory = List[Tuple[datetime, float, int]]
+PriceHistory = list[tuple[datetime, float, int]]
 
 
 class SteamDataError(Exception):
@@ -77,7 +77,7 @@ class GroupItem:
 class KnifeGroup:
     key: str
     name: str
-    items: Dict[str, GroupItem] = field(default_factory=dict)
+    items: dict[str, GroupItem] = field(default_factory=dict)
 
 
 def _check_currency(currency: Any, what: str) -> None:
@@ -124,7 +124,7 @@ class RateLimit:
     successes: int = 0
 
 
-def default_rate_limits() -> Dict[str, RateLimit]:
+def default_rate_limits() -> dict[str, RateLimit]:
     return {
         # Steam starts rejecting group pages at around 20-28 per minute, and blocks them
         # for longer after several hundred. The scraper can do without them, so give up sooner.
@@ -265,8 +265,8 @@ class SteamMarketClient:
         return payload["data"]
 
     def _search(
-        self, filters: Dict[str, List[str]], start: int, count: int
-    ) -> Tuple[Dict[str, str], int]:
+        self, filters: dict[str, list[str]], start: int, count: int
+    ) -> tuple[dict[str, str], int]:
         """One search request, returns ({group key: group name}, total result count)."""
         data = self._action(
             "actions",
@@ -292,8 +292,8 @@ class SteamMarketClient:
             )
         return groups, data["total_count"]
 
-    def _search_all(self, filters: Dict[str, List[str]]) -> Tuple[Dict[str, str], int]:
-        groups: Dict[str, str] = {}
+    def _search_all(self, filters: dict[str, list[str]]) -> tuple[dict[str, str], int]:
+        groups: dict[str, str] = {}
         start = 0
         while True:
             page, total = self._search(filters, start, SEARCH_PAGE_SIZE)
@@ -302,7 +302,7 @@ class SteamMarketClient:
             if not page or start >= total:
                 return groups, total
 
-    def get_knife_weapon_tags(self) -> List[str]:
+    def get_knife_weapon_tags(self) -> list[str]:
         response = self._get(
             f"{MARKET_URL}/appfacets/{APPID}", "market filters", "listings"
         )
@@ -314,7 +314,7 @@ class SteamMarketClient:
             tag for tag in tags if tag.startswith(("weapon_knife", "weapon_bayonet"))
         ]
 
-    def search_knife_groups(self) -> Dict[str, str]:
+    def search_knife_groups(self) -> dict[str, str]:
         """
         Returns {group key: group name} for every knife skin on the market.
         Search results are grouped by skin, a group holds every wear/StatTrak variant.
@@ -322,7 +322,7 @@ class SteamMarketClient:
         # The order of search results changes between requests, so paging through all
         # knives skips some. Searching per knife type keeps every result on one page.
         _, total = self._search(KNIFE_FILTERS, 0, 1)
-        groups: Dict[str, str] = {}
+        groups: dict[str, str] = {}
         try:
             weapon_tags = self.get_knife_weapon_tags()
         except (SteamDataError, SteamUnavailableError) as e:
@@ -369,7 +369,7 @@ class SteamMarketClient:
             raise SteamDataError(f"Could not parse page data for group {name}.") from e
 
         group = KnifeGroup(key, name)
-        histories: Dict[str, PriceHistory] = {}
+        histories: dict[str, PriceHistory] = {}
         for query in queries:
             query_key = query.get("queryKey") or []
             state = query.get("state") or {}

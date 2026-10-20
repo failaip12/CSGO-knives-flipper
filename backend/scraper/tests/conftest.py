@@ -13,9 +13,10 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Optional
 
 import pytest
 
@@ -40,15 +41,15 @@ ORDER_BOOK = {
 
 # (status, body) or (status, body, headers). Status "drop" closes the connection,
 # "slow429" answers 429 after a short delay so several requests are in flight at once.
-Response = Tuple[Any, ...]
+Response = tuple[Any, ...]
 
 
 class FakeSteam:
     """Local HTTP server standing in for steamcommunity.com."""
 
     def __init__(self):
-        self.calls: List[Tuple[float, str, dict]] = []
-        self.queue: List[Response] = []
+        self.calls: list[tuple[float, str, dict]] = []
+        self.queue: list[Response] = []
         # Answers requests once the queue is empty: route(path) -> response.
         self.route: Callable[[str], Response] = lambda path: (
             200,
@@ -191,7 +192,7 @@ class Database:
         ]
         return dict(zip(keys, rows[0], strict=True))
 
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return sorted(row[0] for row in self.query("SELECT knife_name FROM knives"))
 
     def history(self, knife_id: int) -> list:
@@ -234,7 +235,7 @@ def run_scraper(db, logger, tmp_path, monkeypatch):
     monkeypatch.setattr(scraper, "RETRY_WAIT", 0)
     failed_file = tmp_path / "failed_knives.csv"
 
-    def run(client=None, discover: bool = True) -> List[str]:
+    def run(client=None, discover: bool = True) -> list[str]:
         if client is not None:
             monkeypatch.setattr(scraper, "SteamMarketClient", lambda logger: client)
         if failed_file.exists():

@@ -4,13 +4,12 @@ import random
 import shutil
 import string
 import tempfile
-from typing import List
 
 from CustomLogger import CustomLogger
 
 
 def log_failed_knives(
-    failed_knives: List[str], file_name, logger: CustomLogger
+    failed_knives: list[str], file_name, logger: CustomLogger
 ) -> None:
     """Log the names of knives that failed to fetch into a CSV file."""
     try:
@@ -26,7 +25,7 @@ def log_failed_knives(
         logger.error(f"An error occurred: {e}")
 
 
-def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> List[str]:
+def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> list[str]:
     """
     Load a CSV file into a set.
 

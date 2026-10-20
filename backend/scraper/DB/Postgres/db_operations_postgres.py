@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import psycopg2
 import psycopg2.errors
@@ -35,7 +35,7 @@ def add_knife_to_db(name: str, cur: cursor, conn: connection) -> int:
 
 
 def save_price_history(
-    history: List[Tuple[datetime, float, int]],
+    history: list[tuple[datetime, float, int]],
     cur: cursor,
     conn: connection,
     knife_id: int,
@@ -70,7 +70,7 @@ def save_price_history(
     conn.commit()
 
 
-def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> None:
+def save_knives_to_db(knives: list[Knife], cur: cursor, conn: connection) -> None:
     if not knives:
         return
 
@@ -108,7 +108,7 @@ def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> Non
 
 def get_knife_names_from_db(
     cur: cursor, limit: Optional[int] = None, date: Optional[str] = None
-) -> List[str]:
+) -> list[str]:
     if date is None:
         select_query = (
             "SELECT knife_name FROM knives ORDER BY last_updated ASC NULLS FIRST"
@@ -122,7 +122,7 @@ def get_knife_names_from_db(
     return knife_list
 
 
-def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> List[Knife]:
+def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> list[Knife]:
     if date is None:
         select_query = "SELECT * FROM knives ORDER BY last_updated ASC NULLS FIRST"
     else:
@@ -170,7 +170,7 @@ def get_knife_from_db(cur: cursor, name: str) -> Optional[Knife]:
 
 def connect_to_db(
     host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
-) -> Tuple[connection, cursor]:
+) -> tuple[connection, cursor]:
     try:
         conn = psycopg2.connect(
             host=host, dbname=database, port=port, user=user, password=password
@@ -184,7 +184,7 @@ def connect_to_db(
 
 def connect_to_db_threaded(
     host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
-) -> Tuple[connection, cursor]:
+) -> tuple[connection, cursor]:
     return connect_to_db(
         host=host,
         database=database,
