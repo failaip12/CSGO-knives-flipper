@@ -1,69 +1,13 @@
 from datetime import datetime
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 import psycopg2
 import psycopg2.errors
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import execute_values
-from tqdm import tqdm
 
 from CustomLogger import CustomLogger
 from Knife import Knife
-
-
-def add_new_knives_to_db(
-    names: Set[str], cur: cursor, conn: connection, logger: CustomLogger
-) -> None:
-    count = 0
-    for name in tqdm(names):
-        cur.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
-        if cur.fetchone() is None:
-            cur.execute(
-                "INSERT INTO knives (knife_name) VALUES (%s)",
-                (name,),
-            )
-            conn.commit()
-            count += 1
-    logger.info(f"Added {count} new knives to the database.")
-
-
-def get_and_save_historical_pricing_helper(
-    data: List[List],
-    date_format: str,
-    cur: cursor,
-    conn: connection,
-    knife_id: int,
-) -> Tuple[Optional[float], Optional[datetime]]:
-    price = None
-    parsed_date = None
-    for result in data:
-        date_string = result[0][:-4]
-        parsed_date = datetime.strptime(date_string, date_format)
-        price = result[1]
-        sold_count = result[2]
-        cur.execute(
-            "INSERT INTO SellTimes (sell_time) VALUES (%s) ON CONFLICT (sell_time) DO NOTHING RETURNING sell_time_id",
-            (parsed_date,),
-        )
-
-        existing_date = cur.fetchone()
-        if existing_date:
-            date_id = existing_date[0]
-        else:
-            cur.execute(
-                "SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)",
-                (parsed_date,),
-            )
-            fetched_row = cur.fetchone()
-            date_id = fetched_row[0] if fetched_row is not None else None
-
-        if date_id is not None:
-            cur.execute(
-                "INSERT INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s) ON CONFLICT (knife_id, sell_time_id) DO NOTHING",
-                (knife_id, date_id, price, sold_count),
-            )
-            conn.commit()
-    return price, parsed_date
 
 
 def add_knife_to_db(name: str, cur: cursor, conn: connection) -> int:
