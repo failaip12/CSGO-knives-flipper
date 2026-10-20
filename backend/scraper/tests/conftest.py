@@ -13,7 +13,7 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -131,7 +131,7 @@ def fast_limits(monkeypatch):
 
 # --- Database --------------------------------------------------------------------------
 
-DB_SETTINGS = {
+DB_SETTINGS: dict[str, Any] = {
     "host": os.environ.get("KNIVES_TEST_DB_HOST", "localhost"),
     "port": int(os.environ.get("KNIVES_TEST_DB_PORT", "5432")),
     "user": os.environ.get("KNIVES_TEST_DB_USER", "scraper"),
@@ -162,10 +162,11 @@ class Database:
     def __init__(self, connection):
         self.connection = connection
 
-    def query(self, sql: str, *args: Any) -> list | None:
+    def query(self, sql: str, *args: Any) -> list:
+        """The rows the query returned, none for statements that don't return rows."""
         with self.connection.cursor() as cur:
             cur.execute(sql, args)
-            return cur.fetchall() if cur.description else None
+            return cur.fetchall() if cur.description else []
 
     def reset(self) -> None:
         self.query("DROP TABLE IF EXISTS SellHistory, SellTimes, Knives")
@@ -207,7 +208,7 @@ class Database:
 
 
 @pytest.fixture
-def db(test_database) -> Database:
+def db(test_database) -> Iterator[Database]:
     connection = psycopg2.connect(dbname=test_database, **DB_SETTINGS)
     connection.autocommit = True
     database = Database(connection)

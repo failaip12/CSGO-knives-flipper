@@ -348,7 +348,7 @@ def test_wrong_currency_stops_the_run_cleanly(db, run_scraper):
 
 def test_lost_database_connection(db, run_scraper):
     names, pages, books = many_knives(40)
-    killed = []
+    killed: list[str] = []
 
     def kill_connections(name):
         if name == names[10] and not killed:
@@ -576,7 +576,7 @@ def test_group_pages_blocked_for_good(
 
 def test_search_blocked_for_good(db, run_scraper, fake_steam, fast_limits, group_page):
     fast_limits(max_blocked=3)
-    page_hits = []
+    page_hits: list[str] = []
     fake_steam.route = market_route(
         group_page, page_hits, search=False, history_price=99.0
     )
