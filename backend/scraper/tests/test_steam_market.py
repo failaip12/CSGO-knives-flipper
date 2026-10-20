@@ -2,6 +2,7 @@ import json
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from itertools import pairwise
 
 import pytest
 from conftest import GROUP_PAGE_KEY
@@ -385,7 +386,7 @@ def test_rate_limit_is_shared_by_threads(client, fake_steam):
 
     times = [call[0] for call in fake_steam.calls]
     assert times[-1] - times[0] >= 1.8
-    assert min(b - a for a, b in zip(times, times[1:], strict=False)) > 0.07
+    assert min(b - a for a, b in pairwise(times)) > 0.07
 
 
 def test_simultaneous_rejections_start_one_cooldown(client, fake_steam):
