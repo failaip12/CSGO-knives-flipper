@@ -4,7 +4,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -93,7 +93,7 @@ def parse_price_history(data: Any, what: str) -> PriceHistory:
     _check_currency(data.get("ecurrency"), what)
     history = []
     for entry in data["prices"]:
-        sold_at = datetime.fromtimestamp(int(entry["time"]), timezone.utc)
+        sold_at = datetime.fromtimestamp(int(entry["time"]), UTC)
         history.append(
             (
                 sold_at.replace(tzinfo=None),
