@@ -3,6 +3,7 @@ import re
 import threading
 import time
 import urllib.parse
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -104,6 +105,41 @@ def parse_price_history(data: Any, what: str) -> PriceHistory:
         )
     history.sort(key=lambda entry: entry[0])
     return history
+
+
+def market_queries(page: str, name: str) -> Iterator[tuple[str, str, Any]]:
+    """
+    (kind, item name, data) of every market query a group page was rendered with,
+    kind being e.g. "description" or "pricehistory".
+    """
+    match = SSR_DATA_RE.search(page)
+    if not match:
+        raise SteamDataError(f"No page data found for group {name}.")
+    try:
+        ssr = json.loads(match.group(1))
+        queries = json.loads(ssr["renderContext"]["queryData"])["queries"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise SteamDataError(f"Could not parse page data for group {name}.") from e
+    for query in queries:
+        query_key = query.get("queryKey") or []
+        state = query.get("state") or {}
+        if (
+            len(query_key) == 4
+            and query_key[0] == "market"
+            and query_key[2] == APPID
+            and state.get("status") == "success"
+            and state.get("data")
+        ):
+            yield query_key[1], query_key[3], state["data"]
+
+
+def knife_item(name: str, description: Any) -> GroupItem | None:
+    """The item an item description is about, None if it isn't a knife."""
+    tags = {tag.get("internal_name") for tag in description.get("tags") or []}
+    if "CSGO_Type_Knife" not in tags:
+        return None
+    icon_url = description.get("icon_url")
+    return GroupItem(name, IMAGE_URL.format(icon_url) if icon_url else None)
 
 
 @dataclass
@@ -360,38 +396,14 @@ class SteamMarketClient:
         """
         url = f"{MARKET_URL}/listings/{APPID}/{urllib.parse.quote(key)}"
         response = self._get(url, f"group page {name}", "listings")
-        match = SSR_DATA_RE.search(response.text)
-        if not match:
-            raise SteamDataError(f"No page data found for group {name}.")
-        try:
-            ssr = json.loads(match.group(1))
-            queries = json.loads(ssr["renderContext"]["queryData"])["queries"]
-        except (ValueError, KeyError, TypeError) as e:
-            raise SteamDataError(f"Could not parse page data for group {name}.") from e
-
         group = KnifeGroup(key, name)
         histories: dict[str, PriceHistory] = {}
-        for query in queries:
-            query_key = query.get("queryKey") or []
-            state = query.get("state") or {}
-            if (
-                len(query_key) != 4
-                or query_key[0] != "market"
-                or query_key[2] != APPID
-                or state.get("status") != "success"
-                or not state.get("data")
-            ):
-                continue
-            item_name, data = query_key[3], state["data"]
-            if query_key[1] == "description":
-                tags = {tag.get("internal_name") for tag in data.get("tags") or []}
-                if "CSGO_Type_Knife" not in tags:
-                    continue
-                icon_url = data.get("icon_url")
-                group.items[item_name] = GroupItem(
-                    item_name, IMAGE_URL.format(icon_url) if icon_url else None
-                )
-            elif query_key[1] == "pricehistory":
+        for kind, item_name, data in market_queries(response.text, name):
+            if kind == "description":
+                item = knife_item(item_name, data)
+                if item:
+                    group.items[item_name] = item
+            elif kind == "pricehistory":
                 try:
                     histories[item_name] = parse_price_history(data, item_name)
                 except (SteamDataError, KeyError, TypeError, ValueError) as e:
