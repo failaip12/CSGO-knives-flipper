@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime
 
 import psycopg2
@@ -177,7 +178,7 @@ def connect_to_db(
         cur = conn.cursor()
     except psycopg2.Error as e:
         logger.fatal("SQL connection error " + str(e))
-        exit(1)
+        sys.exit(1)
     return conn, cur
 
 
