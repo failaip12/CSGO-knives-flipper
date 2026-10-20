@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import List, Optional, Set, Tuple
 
 import psycopg2
+import psycopg2.errors
 from psycopg2.extensions import connection, cursor
+from psycopg2.extras import execute_values
 from tqdm import tqdm
 
 from CustomLogger import CustomLogger
@@ -62,6 +64,66 @@ def get_and_save_historical_pricing_helper(
             )
             conn.commit()
     return price, parsed_date
+
+
+def add_knife_to_db(name: str, cur: cursor, conn: connection) -> int:
+    """Inserts the knife if it's missing and returns its knife_id."""
+    # Existing knife_ids were overwritten with Steam ids in the past, so the serial
+    # sequence can hand out an id that is already taken. Retrying moves past it.
+    for _ in range(1000):
+        try:
+            cur.execute(
+                "INSERT INTO knives (knife_name) VALUES (%s) ON CONFLICT (knife_name) DO NOTHING RETURNING knife_id",
+                (name,),
+            )
+            row = cur.fetchone()
+            conn.commit()
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()
+            continue
+        if row:
+            return row[0]
+        cur.execute("SELECT knife_id FROM knives WHERE knife_name = %s", (name,))
+        existing = cur.fetchone()
+        if existing:
+            return existing[0]
+    raise RuntimeError(f"Could not find a free knife_id for {name}")
+
+
+def save_price_history(
+    history: List[Tuple[datetime, float, int]],
+    cur: cursor,
+    conn: connection,
+    knife_id: int,
+) -> None:
+    """Upserts (sell time, price, amount sold) entries into SellHistory."""
+    rows_by_time = {sold_at: (price, amount) for sold_at, price, amount in history}
+    if not rows_by_time:
+        return
+    times = list(rows_by_time)
+    execute_values(
+        cur,
+        "INSERT INTO SellTimes (sell_time) VALUES %s ON CONFLICT (sell_time) DO NOTHING",
+        [(sold_at,) for sold_at in times],
+        page_size=1000,
+    )
+    cur.execute(
+        "SELECT sell_time, sell_time_id FROM SellTimes WHERE sell_time = ANY(%s)",
+        (times,),
+    )
+    time_ids = dict(cur.fetchall())
+    execute_values(
+        cur,
+        """INSERT INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES %s
+        ON CONFLICT (knife_id, sell_time_id) DO UPDATE
+        SET price = EXCLUDED.price, quantity = EXCLUDED.quantity""",
+        [
+            (knife_id, time_ids[sold_at], price, amount)
+            for sold_at, (price, amount) in rows_by_time.items()
+        ],
+        page_size=1000,
+    )
+    conn.commit()
 
 
 def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> None:
