@@ -22,6 +22,8 @@ import pytest
 
 SCRAPER_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRAPER_DIR))
+# Needed to import the scraper's DB config, the tests connect with DB_SETTINGS instead.
+os.environ.setdefault("KNIVES_DB_PASSWORD", "unused")
 
 import psycopg2
 

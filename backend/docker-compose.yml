@@ -1,5 +1,6 @@
 # Postgres for the scraper and the API: docker compose up -d
 # The schema is created from baza_postgres.sql the first time the volume is empty.
+# The scraper and the API need KNIVES_DB_PASSWORD=scraper in scraper/.env.
 services:
   db:
     image: postgres:18

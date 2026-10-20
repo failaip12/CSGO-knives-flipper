@@ -3,3 +3,4 @@ sqlmodel
 mysql-connector-python
 steampy
 steamsignin
+python-dotenv
