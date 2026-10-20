@@ -6,6 +6,7 @@ docker-compose.yml (change it with the KNIVES_TEST_DB_* environment variables).
 They drop its tables, so they refuse to run against the knives database, and
 they're skipped when Postgres isn't reachable.
 """
+
 import csv
 import json
 import os
@@ -30,7 +31,12 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 GROUP_PAGE_KEY = "G18F403204D3003"
 SCHEMA = (SCRAPER_DIR / "DB" / "Postgres" / "baza_postgres.sql").read_text()
 
-ORDER_BOOK = {"data": {"success": True, "data": {"amtMaxBuyOrder": 12221, "amtMinSellOrder": 13130, "eCurrency": 3}}}
+ORDER_BOOK = {
+    "data": {
+        "success": True,
+        "data": {"amtMaxBuyOrder": 12221, "amtMinSellOrder": 13130, "eCurrency": 3},
+    }
+}
 
 # (status, body) or (status, body, headers). Status "drop" closes the connection,
 # "slow429" answers 429 after a short delay so several requests are in flight at once.
@@ -44,7 +50,10 @@ class FakeSteam:
         self.calls: List[Tuple[float, str, dict]] = []
         self.queue: List[Response] = []
         # Answers requests once the queue is empty: route(path) -> response.
-        self.route: Callable[[str], Response] = lambda path: (200, json.dumps(ORDER_BOOK))
+        self.route: Callable[[str], Response] = lambda path: (
+            200,
+            json.dumps(ORDER_BOOK),
+        )
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -169,8 +178,17 @@ class Database:
         )
         if not rows:
             return None
-        keys = ["knife_id", "ask", "bid", "last_price", "last_sold", "image", "last_updated",
-                "amount_sold", "amount_sold_last_year"]
+        keys = [
+            "knife_id",
+            "ask",
+            "bid",
+            "last_price",
+            "last_sold",
+            "image",
+            "last_updated",
+            "amount_sold",
+            "amount_sold_last_year",
+        ]
         return dict(zip(keys, rows[0], strict=True))
 
     def names(self) -> List[str]:
@@ -205,8 +223,12 @@ def run_scraper(db, logger, tmp_path, monkeypatch):
         scraper,
         "connect_to_db",
         lambda host, database, port, user, password, logger: original_connect(
-            DB_SETTINGS["host"], db.connection.info.dbname, DB_SETTINGS["port"],
-            DB_SETTINGS["user"], DB_SETTINGS["password"], logger,
+            DB_SETTINGS["host"],
+            db.connection.info.dbname,
+            DB_SETTINGS["port"],
+            DB_SETTINGS["user"],
+            DB_SETTINGS["password"],
+            logger,
         ),
     )
     monkeypatch.setattr(scraper, "RETRY_WAIT", 0)

@@ -36,8 +36,13 @@ def qp(path: str):
 
 def search_result(*names):
     return [
-        {"strHash": f"{name} (Factory New)",
-         "asset_description": {"market_bucket_group_id": f"G{name}", "market_bucket_group_name": name}}
+        {
+            "strHash": f"{name} (Factory New)",
+            "asset_description": {
+                "market_bucket_group_id": f"G{name}",
+                "market_bucket_group_name": name,
+            },
+        }
         for name in names
     ]
 
@@ -58,7 +63,18 @@ def test_order_book_request_and_prices(client, fake_steam):
 
 
 def test_order_book_without_orders(client, fake_steam):
-    fake_steam.reply_json({"data": {"success": True, "data": {"amtMaxBuyOrder": None, "amtMinSellOrder": None, "eCurrency": 3}}})
+    fake_steam.reply_json(
+        {
+            "data": {
+                "success": True,
+                "data": {
+                    "amtMaxBuyOrder": None,
+                    "amtMinSellOrder": None,
+                    "eCurrency": 3,
+                },
+            }
+        }
+    )
 
     book = client().get_order_book("x")
 
@@ -73,7 +89,14 @@ def test_order_book_for_unknown_item(client, fake_steam):
 
 
 def test_order_book_in_other_currency(client, fake_steam):
-    fake_steam.reply_json({"data": {"success": True, "data": {"amtMaxBuyOrder": 1, "amtMinSellOrder": 2, "eCurrency": 1}}})
+    fake_steam.reply_json(
+        {
+            "data": {
+                "success": True,
+                "data": {"amtMaxBuyOrder": 1, "amtMinSellOrder": 2, "eCurrency": 1},
+            }
+        }
+    )
 
     with pytest.raises(sm.SteamCurrencyError):
         client().get_order_book("usd")
@@ -87,21 +110,42 @@ def test_price_history_in_other_currency(client, fake_steam):
 
 
 def test_price_history_is_sorted_utc_and_rounded(client, fake_steam):
-    fake_steam.reply_json({"data": {"ecurrency": 3, "prices": [
-        {"time": 1760900400, "price_median": 124.70000457763672, "purchases": 2},
-        {"time": 1406419200, "price_median": 224.4482421875, "purchases": 1},
-    ]}})
+    fake_steam.reply_json(
+        {
+            "data": {
+                "ecurrency": 3,
+                "prices": [
+                    {
+                        "time": 1760900400,
+                        "price_median": 124.70000457763672,
+                        "purchases": 2,
+                    },
+                    {
+                        "time": 1406419200,
+                        "price_median": 224.4482421875,
+                        "purchases": 1,
+                    },
+                ],
+            }
+        }
+    )
 
     history = client().get_price_history("a")
 
-    assert [str(sold_at) for sold_at, _, _ in history] == ["2014-07-27 00:00:00", "2025-10-19 19:00:00"]
+    assert [str(sold_at) for sold_at, _, _ in history] == [
+        "2014-07-27 00:00:00",
+        "2025-10-19 19:00:00",
+    ]
     assert history[1][1:] == (124.7, 2)
 
 
-@pytest.mark.parametrize("body", [
-    '{"data": null}',
-    '{"data": {"ecurrency": 3, "prices": [{"time": "x"}]}}',
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"data": null}',
+        '{"data": {"ecurrency": 3, "prices": [{"time": "x"}]}}',
+    ],
+)
 def test_unusable_price_history(client, fake_steam, body):
     fake_steam.reply((200, body))
 
@@ -140,17 +184,25 @@ def test_group_page(client, fake_steam, group_page):
 
     assert fake_steam.calls[0][1] == f"/market/listings/730/{GROUP_PAGE_KEY}"
     assert len(group.items) == 10
-    assert BAYONET in group.items and "★ StatTrak™ Bayonet | Boreal Forest (Factory New)" in group.items
+    assert (
+        BAYONET in group.items
+        and "★ StatTrak™ Bayonet | Boreal Forest (Factory New)" in group.items
+    )
     for item in group.items.values():
         assert item.history
-        assert item.image.startswith("https://community.fastly.steamstatic.com/economy/image/")
+        assert item.image.startswith(
+            "https://community.fastly.steamstatic.com/economy/image/"
+        )
 
 
-@pytest.mark.parametrize("body", [
-    "<html>new layout</html>",
-    '<script type="application/json" id="valve-ssr-data">{"broken"</script>',
-    '<script type="application/json" id="valve-ssr-data">{"renderContext": {"queryData": "{\\"queries\\": []}"}}</script>',
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<html>new layout</html>",
+        '<script type="application/json" id="valve-ssr-data">{"broken"</script>',
+        '<script type="application/json" id="valve-ssr-data">{"renderContext": {"queryData": "{\\"queries\\": []}"}}</script>',
+    ],
+)
 def test_unusable_group_page(client, fake_steam, body):
     fake_steam.reply((200, body))
 
@@ -164,7 +216,12 @@ def test_unusable_group_page(client, fake_steam, body):
 def test_search_paging(client, fake_steam):
     fake_steam.reply_json(
         {"data": {"total_count": 103, "results": search_result("A", "B")}},
-        {"data": {"total_count": 103, "results": [{"strHash": "★ C", "asset_description": {}}]}},
+        {
+            "data": {
+                "total_count": 103,
+                "results": [{"strHash": "★ C", "asset_description": {}}],
+            }
+        },
     )
 
     groups, total = client()._search_all(sm.KNIFE_FILTERS)
@@ -173,9 +230,19 @@ def test_search_paging(client, fake_steam):
     assert [qp(path)[0]["start"] for _, path, _ in fake_steam.calls] == [0, 100]
 
 
-FACETS = {"success": True, "facets": {"Weapon": {"tags": {
-    "weapon_ak47": {}, "weapon_bayonet": {}, "weapon_knife_karambit": {}, "weapon_knife_new_one": {},
-}}}}
+FACETS = {
+    "success": True,
+    "facets": {
+        "Weapon": {
+            "tags": {
+                "weapon_ak47": {},
+                "weapon_bayonet": {},
+                "weapon_knife_karambit": {},
+                "weapon_knife_new_one": {},
+            }
+        }
+    },
+}
 
 
 def test_search_per_knife_type(client, fake_steam):
@@ -190,9 +257,18 @@ def test_search_per_knife_type(client, fake_steam):
     groups = client().search_knife_groups()
 
     assert set(groups) == {"GB1", "GK1", "GK2", "GN1"}
-    searched = [qp(path)[0]["filters"].get("Weapon") for _, path, _ in fake_steam.calls if "Search" in path]
+    searched = [
+        qp(path)[0]["filters"].get("Weapon")
+        for _, path, _ in fake_steam.calls
+        if "Search" in path
+    ]
     # Guns are skipped, knife types Steam adds later are picked up.
-    assert searched == [None, ["weapon_bayonet"], ["weapon_knife_karambit"], ["weapon_knife_new_one"]]
+    assert searched == [
+        None,
+        ["weapon_bayonet"],
+        ["weapon_knife_karambit"],
+        ["weapon_knife_new_one"],
+    ]
 
 
 def test_search_falls_back_to_all_knives_when_groups_are_missing(client, fake_steam):
@@ -211,7 +287,9 @@ def test_search_falls_back_to_all_knives_when_groups_are_missing(client, fake_st
 def test_search_without_knife_types(client, fake_steam):
     fake_steam.reply_json({"data": {"total_count": 2, "results": search_result("x")}})
     fake_steam.reply(*[(500, "")] * sm.MAX_ATTEMPTS)
-    fake_steam.reply_json({"data": {"total_count": 2, "results": search_result("A1", "A2")}})
+    fake_steam.reply_json(
+        {"data": {"total_count": 2, "results": search_result("A1", "A2")}}
+    )
 
     assert set(client().search_knife_groups()) == {"GA1", "GA2"}
 
@@ -340,7 +418,10 @@ def test_blocked_order_books_dont_pause_group_pages(client, fake_steam, group_pa
 def test_blocked_search_doesnt_pause_price_history(client, fake_steam):
     market = client()
     fake_steam.reply((429, ""))
-    fake_steam.reply_json({"data": {"ecurrency": 3, "prices": []}}, {"data": {"total_count": 0, "results": []}})
+    fake_steam.reply_json(
+        {"data": {"ecurrency": 3, "prices": []}},
+        {"data": {"total_count": 0, "results": []}},
+    )
 
     with ThreadPoolExecutor(2) as executor:
         search = executor.submit(market._search, sm.KNIFE_FILTERS, 0, 1)
@@ -364,7 +445,8 @@ def test_adaptive_rate(client, fake_steam):
 
     for _ in range(sm.SPEED_UP_AFTER - 1):
         market.get_order_book("a")
-    assert limit.interval == pytest.approx(0.017)  # 15% faster after SPEED_UP_AFTER successes
+    # 15% faster after SPEED_UP_AFTER successes
+    assert limit.interval == pytest.approx(0.017)
 
     fake_steam.reply((429, ""), (429, ""))
     market.get_order_book("a")

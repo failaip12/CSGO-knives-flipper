@@ -133,11 +133,15 @@ def run_parallel(
     Pending jobs are cancelled as soon as the caller leaves the with block.
     """
     executor = ThreadPoolExecutor(WORKERS)
-    futures: Dict[Future, str] = {executor.submit(job): key for key, job in jobs.items()}
+    futures: Dict[Future, str] = {
+        executor.submit(job): key for key, job in jobs.items()
+    }
     try:
         yield (
             (futures[future], future)
-            for future in tqdm(as_completed(futures), total=len(futures), desc=description)
+            for future in tqdm(
+                as_completed(futures), total=len(futures), desc=description
+            )
         )
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
@@ -160,7 +164,9 @@ class KnifeUpdater:
         # Group pages loaded this run, a knife missing from its page isn't on it at all.
         self.loaded_groups: Set[str] = set()
         self.images: Dict[str, str] = {
-            name: knife.knife_image for name, knife in self.knives.items() if knife.knife_image
+            name: knife.knife_image
+            for name, knife in self.knives.items()
+            if knife.knife_image
         }
 
     def _connect(self) -> None:
@@ -291,7 +297,9 @@ class KnifeUpdater:
                 except FATAL_ERRORS:
                     raise
                 except Exception as e:
-                    self.logger.warning(f"Could not load knife group {groups[key]}: {e!r}")
+                    self.logger.warning(
+                        f"Could not load knife group {groups[key]}: {e!r}"
+                    )
                     failed_groups[key] = groups[key]
                     continue
                 for result in results:
@@ -302,7 +310,10 @@ class KnifeUpdater:
         return failed_groups
 
     def process_knives(
-        self, client: SteamMarketClient, knives: Dict[str, KnifeResult], description: str
+        self,
+        client: SteamMarketClient,
+        knives: Dict[str, KnifeResult],
+        description: str,
     ) -> Dict[str, KnifeResult]:
         """Updates knives one by one. Returns the ones that still failed."""
         failed = {}
@@ -341,7 +352,11 @@ class KnifeUpdater:
                 )
                 time.sleep(RETRY_WAIT)
             groups = self.process_groups(
-                client, groups, seen, incomplete, f"{description} (attempt {attempt + 1})"
+                client,
+                groups,
+                seen,
+                incomplete,
+                f"{description} (attempt {attempt + 1})",
             )
         self.flush()
 
@@ -360,7 +375,8 @@ class KnifeUpdater:
         """
         groups = {knife_group_name(name) for name in self.knives}
         candidates = sorted(
-            {name for group in groups for name in group_variants(group)} - self.knives.keys()
+            {name for group in groups for name in group_variants(group)}
+            - self.knives.keys()
         )
         found = []
         jobs = {
@@ -405,7 +421,9 @@ class KnifeUpdater:
                 except FATAL_ERRORS:
                     raise
                 except Exception as e:
-                    self.logger.warning(f"Could not check whether {group} exists: {e!r}")
+                    self.logger.warning(
+                        f"Could not check whether {group} exists: {e!r}"
+                    )
                     continue
                 if name:
                     found[name] = group
@@ -435,7 +453,9 @@ class KnifeUpdater:
         if self.discover:
             known = set(groups.values()) | {knife_group_name(n) for n in self.knives}
             unlisted = self.find_unlisted_groups(client, known)
-            self.update_groups(client, unlisted, seen, incomplete, "Unlisted knife groups")
+            self.update_groups(
+                client, unlisted, seen, incomplete, "Unlisted knife groups"
+            )
 
         # Knives that weren't on the loaded group pages, because the search failed, their
         # group failed to load or they're not listed in the search anymore. A knife's own

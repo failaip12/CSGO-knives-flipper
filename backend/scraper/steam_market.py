@@ -129,9 +129,15 @@ def default_rate_limits() -> Dict[str, RateLimit]:
         # Steam starts rejecting group pages at around 20-28 per minute, and blocks them
         # for longer after several hundred. The scraper can do without them, so give up sooner.
         "listings": RateLimit(
-            "listings", "group pages", interval=2.5, min_interval=2.5, max_blocked=15 * 60
+            "listings",
+            "group pages",
+            interval=2.5,
+            min_interval=2.5,
+            max_blocked=15 * 60,
         ),
-        "orderbook": RateLimit("orderbook", "order books", interval=0.2, min_interval=0.1),
+        "orderbook": RateLimit(
+            "orderbook", "order books", interval=0.2, min_interval=0.1
+        ),
         # Search has the strictest limit, but known knives can be updated without it.
         "search": RateLimit(
             "search", "search", interval=2.0, min_interval=2.0, max_blocked=10 * 60
@@ -235,10 +241,14 @@ class SteamMarketClient:
             if response.status_code == 200:
                 return response
             if response.status_code < 500:
-                raise SteamDataError(f"Steam returned {response.status_code} for {what}.")
+                raise SteamDataError(
+                    f"Steam returned {response.status_code} for {what}."
+                )
             attempt += 1
             if attempt >= MAX_ATTEMPTS:
-                raise SteamDataError(f"Steam returned {response.status_code} for {what}.")
+                raise SteamDataError(
+                    f"Steam returned {response.status_code} for {what}."
+                )
             self._stopped.wait(2**attempt)
 
     def _action(self, endpoint: str, action: str, *args: Any, limit: str) -> Any:
@@ -254,7 +264,9 @@ class SteamMarketClient:
             raise SteamDataError(f"Unexpected response for {what}.")
         return payload["data"]
 
-    def _search(self, filters: Dict[str, List[str]], start: int, count: int) -> Tuple[Dict[str, str], int]:
+    def _search(
+        self, filters: Dict[str, List[str]], start: int, count: int
+    ) -> Tuple[Dict[str, str], int]:
         """One search request, returns ({group key: group name}, total result count)."""
         data = self._action(
             "actions",
@@ -275,7 +287,9 @@ class SteamMarketClient:
         for result in data.get("results") or []:
             description = result.get("asset_description") or {}
             key = description.get("market_bucket_group_id") or result["strHash"]
-            groups[key] = description.get("market_bucket_group_name") or result["strHash"]
+            groups[key] = (
+                description.get("market_bucket_group_name") or result["strHash"]
+            )
         return groups, data["total_count"]
 
     def _search_all(self, filters: Dict[str, List[str]]) -> Tuple[Dict[str, str], int]:
@@ -289,12 +303,16 @@ class SteamMarketClient:
                 return groups, total
 
     def get_knife_weapon_tags(self) -> List[str]:
-        response = self._get(f"{MARKET_URL}/appfacets/{APPID}", "market filters", "listings")
+        response = self._get(
+            f"{MARKET_URL}/appfacets/{APPID}", "market filters", "listings"
+        )
         try:
             tags = response.json()["facets"]["Weapon"]["tags"]
         except (ValueError, KeyError, TypeError) as e:
             raise SteamDataError("Could not parse the market filters.") from e
-        return [tag for tag in tags if tag.startswith(("weapon_knife", "weapon_bayonet"))]
+        return [
+            tag for tag in tags if tag.startswith(("weapon_knife", "weapon_bayonet"))
+        ]
 
     def search_knife_groups(self) -> Dict[str, str]:
         """
