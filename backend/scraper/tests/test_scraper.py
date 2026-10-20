@@ -3,6 +3,7 @@ import threading
 import time
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from conftest import GROUP_PAGE_KEY, ORDER_BOOK
@@ -376,7 +377,7 @@ def test_knife_that_cant_be_stored_doesnt_affect_others(db, run_scraper):
     )
 
 
-def test_unexpected_error_on_a_group_page(db, run_scraper):
+def test_unexpected_error_on_a_group_page(db, run_scraper, logger):
     names, pages, books = many_knives(20)
     db.query("INSERT INTO knives (knife_name) VALUES (%s)", names[3])
     client = FakeClient(
@@ -386,6 +387,9 @@ def test_unexpected_error_on_a_group_page(db, run_scraper):
     assert run_scraper(client) == []
 
     assert db.knife(names[3])["ask"] is not None and len(db.names()) == 20
+    log = Path(logger.log_file).read_text(encoding="utf-8")
+    assert "Unexpected error while loading knife group G3." in log
+    assert "Traceback" in log and "KeyError: 'unexpected layout'" in log
 
 
 def test_dead_price_history_only_fails_knives_that_need_it(db, run_scraper):

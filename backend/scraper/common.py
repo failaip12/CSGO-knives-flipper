@@ -21,8 +21,8 @@ def log_failed_knives(
                 )  # Log the failed knife name or other relevant info
     except FileNotFoundError:
         logger.error(f"File '{file_name}' not found.")
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
+    except Exception:
+        logger.exception(f"Could not write '{file_name}'.")
 
 
 def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> list[str]:
@@ -43,8 +43,8 @@ def load_failed_knives_csv(file_name: str, logger: CustomLogger) -> list[str]:
                 data_set.add(row[0])  # Convert each row to a tuple and add to the set
     except FileNotFoundError:
         logger.error(f"File '{file_name}' not found.")
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
+    except Exception:
+        logger.exception(f"Could not read '{file_name}'.")
     return list(data_set)
 
 

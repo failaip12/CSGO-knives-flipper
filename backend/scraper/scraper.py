@@ -217,7 +217,7 @@ class KnifeUpdater:
         try:
             return self._save(result)
         except Exception as e:
-            self.logger.error(f"Error while saving {result.name}: {e!r}")
+            self.logger.exception(f"Error while saving {result.name}.")
             result.error = f"Error while saving: {e!r}"
             self._recover_db()
             return False
@@ -296,9 +296,15 @@ class KnifeUpdater:
                     return {}
                 except FATAL_ERRORS:
                     raise
-                except Exception as e:
+                except SteamDataError as e:
                     self.logger.warning(
-                        f"Could not load knife group {groups[key]}: {e!r}"
+                        f"Could not load knife group {groups[key]}: {e}"
+                    )
+                    failed_groups[key] = groups[key]
+                    continue
+                except Exception:
+                    self.logger.exception(
+                        f"Unexpected error while loading knife group {groups[key]}."
                     )
                     failed_groups[key] = groups[key]
                     continue
@@ -328,6 +334,7 @@ class KnifeUpdater:
                 except FATAL_ERRORS:
                     raise
                 except Exception as e:
+                    self.logger.exception(f"Unexpected error while updating {name}.")
                     knives[name].error = repr(e)
                     failed[name] = knives[name]
                     continue
@@ -388,8 +395,13 @@ class KnifeUpdater:
                     exists = future.result()
                 except FATAL_ERRORS:
                     raise
-                except Exception as e:
-                    self.logger.warning(f"Could not check whether {name} exists: {e!r}")
+                except SteamDataError as e:
+                    self.logger.warning(f"Could not check whether {name} exists: {e}")
+                    continue
+                except Exception:
+                    self.logger.exception(
+                        f"Unexpected error while checking whether {name} exists."
+                    )
                     continue
                 if exists:
                     found.append(name)
@@ -420,9 +432,12 @@ class KnifeUpdater:
                     name = future.result()
                 except FATAL_ERRORS:
                     raise
-                except Exception as e:
-                    self.logger.warning(
-                        f"Could not check whether {group} exists: {e!r}"
+                except SteamDataError as e:
+                    self.logger.warning(f"Could not check whether {group} exists: {e}")
+                    continue
+                except Exception:
+                    self.logger.exception(
+                        f"Unexpected error while checking whether {group} exists."
                     )
                     continue
                 if name:
@@ -432,19 +447,28 @@ class KnifeUpdater:
         )
         return found
 
-    def run(self, client: SteamMarketClient) -> dict[str, KnifeResult]:
+    def search_groups(self, client: SteamMarketClient) -> dict[str, str]:
+        """Every knife group on the market, none if the search fails."""
+        fallback = "only knives already in the database will be updated"
         try:
             groups = client.search_knife_groups()
-            self.logger.info(f"Found {len(groups)} knife groups on the market.")
         except SteamCurrencyError:
             raise
-        except Exception as e:
+        except (SteamDataError, SteamUnavailableError) as e:
             if isinstance(e, SteamUnavailableError) and e.endpoint != "search":
                 raise
-            self.logger.error(
-                f"Could not load the knife list ({e}), only knives already in the database will be updated."
+            self.logger.error(f"Could not load the knife list ({e}), {fallback}.")
+            return {}
+        except Exception:
+            self.logger.exception(
+                f"Unexpected error while loading the knife list, {fallback}."
             )
-            groups = {}
+            return {}
+        self.logger.info(f"Found {len(groups)} knife groups on the market.")
+        return groups
+
+    def run(self, client: SteamMarketClient) -> dict[str, KnifeResult]:
+        groups = self.search_groups(client)
 
         seen: set[str] = set()
         incomplete: dict[str, KnifeResult] = {}

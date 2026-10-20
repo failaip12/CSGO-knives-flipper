@@ -1,5 +1,6 @@
 import inspect
 import os
+import traceback
 from datetime import datetime
 from enum import Enum, auto
 
@@ -106,6 +107,10 @@ class CustomLogger:
     def error(self, message: str) -> None:
         """Log an error message."""
         self._log(LogLevel.ERROR, message)
+
+    def exception(self, message: str) -> None:
+        """Log an error message with the traceback of the exception being handled."""
+        self._log(LogLevel.ERROR, f"{message}\n{traceback.format_exc().rstrip()}")
 
     def fatal(self, message: str) -> None:
         """Log a fatal message."""
