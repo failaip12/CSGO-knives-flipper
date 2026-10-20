@@ -25,7 +25,8 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate",
 }
 SSR_DATA_RE = re.compile(
-    r'<script type="application/json" id="valve-ssr-data"[^>]*>(.*?)</script>', re.S
+    r'<script type="application/json" id="valve-ssr-data"[^>]*>(.*?)</script>',
+    re.DOTALL,
 )
 
 SEARCH_PAGE_SIZE = 100
