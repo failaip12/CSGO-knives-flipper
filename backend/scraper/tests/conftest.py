@@ -23,10 +23,10 @@ import pytest
 SCRAPER_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRAPER_DIR))
 
-import psycopg2  # noqa: E402
+import psycopg2
 
-import steam_market as sm  # noqa: E402
-from CustomLogger import CustomLogger  # noqa: E402
+import steam_market as sm
+from CustomLogger import CustomLogger
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 GROUP_PAGE_KEY = "G18F403204D3003"
