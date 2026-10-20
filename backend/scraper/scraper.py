@@ -243,6 +243,8 @@ class KnifeUpdater:
         ]
         save_price_history(new_history, self.cursor, self.connection, knife.knife_id)
 
+        last_sold: datetime | None
+        last_price: float | None
         if result.history:
             last_sold, last_price, _ = result.history[-1]
         else:
