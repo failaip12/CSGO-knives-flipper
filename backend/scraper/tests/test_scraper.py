@@ -26,11 +26,12 @@ class FakeClient:
     """
 
     def __init__(self, groups, pages, books, histories=None, *, fail_page=None, fail_book=None,
-                 currency_error_on=None, search_error=False, broken_page=None,
+                 exists=(), currency_error_on=None, search_error=False, broken_page=None,
                  on_book=None, delay=0.0):
         self.groups, self.pages, self.books = groups, pages, books
         self.histories = histories or {}
         self.fail_page, self.fail_book = dict(fail_page or {}), dict(fail_book or {})
+        self.exists = set(exists)
         self.currency_error_on, self.search_error = currency_error_on, search_error
         self.broken_page, self.on_book, self.delay = broken_page, on_book, delay
         self.lock = threading.Lock()
@@ -50,6 +51,10 @@ class FakeClient:
         if self.search_error:
             raise sm.SteamDataError("search down")
         return dict(self.groups)
+
+    def item_exists(self, name):
+        self.calls.append(("exists", name))
+        return name in self.exists
 
     def get_knife_group(self, key, name):
         self.calls.append(("page", key))
@@ -91,6 +96,19 @@ class FakeClient:
 ])
 def test_knife_group_name(name, group):
     assert scraper.knife_group_name(name) == group
+
+
+def test_group_variants():
+    assert scraper.group_variants("★ Bayonet") == ["★ Bayonet", "★ StatTrak™ Bayonet"]
+    variants = scraper.group_variants("★ Butterfly Knife | Fade")
+    assert len(variants) == 10
+    assert "★ StatTrak™ Butterfly Knife | Fade (Minimal Wear)" in variants
+
+
+def test_unlisted_group_candidates():
+    known = {"★ A | X", "★ A | Y", "★ B | X", "★ C"}
+
+    assert scraper.unlisted_group_candidates(known) == ["★ A", "★ B", "★ B | Y", "★ C | X", "★ C | Y"]
 
 
 # --- Updating knives -------------------------------------------------------------------------
@@ -183,11 +201,12 @@ def test_data_from_the_old_scraper(db, run_scraper):
 
 def test_without_discovery_only_known_knives_are_updated(db, run_scraper):
     db.query("INSERT INTO knives (knife_name) VALUES (%s)", A)
-    client = basic_market()
+    client = basic_market(exists={"★ A | Y (Factory New)"})
 
     assert run_scraper(client, discover=False) == []
 
     assert db.names() == [A] and db.knife(A)["ask"] is not None
+    assert not any(call[0] == "exists" for call in client.calls)
 
 
 def test_search_failure_updates_known_knives(db, run_scraper):
@@ -268,6 +287,52 @@ def test_dead_price_history_only_fails_knives_that_need_it(db, run_scraper):
     assert run_scraper(client) == [B]
 
     assert db.knife(A)["ask"] is not None
+
+
+# --- Knives Steam's search and group pages leave out -----------------------------------------
+
+
+def test_skins_missing_from_the_search(db, run_scraper):
+    ax, by = "★ A | X (Factory New)", "★ B | Y (Field-Tested)"
+    ay, st_ay = "★ A | Y (Minimal Wear)", "★ StatTrak™ A | Y (Minimal Wear)"
+    pages = {
+        "G1": {ax: ("img", HISTORY)},
+        "G2": {by: ("img", HISTORY)},
+        # The group page Steam serves for the variant that exists, with its own names.
+        ay: {ay: ("img", HISTORY), st_ay: ("img", [])},
+    }
+    books = {ax: (1.0, 1.0), by: (1.0, 1.0), ay: (None, 5.0), st_ay: (None, 3.0)}
+    client = FakeClient({"G1": "★ A | X", "G2": "★ B | Y"}, pages, books, exists={ay})
+
+    assert run_scraper(client) == []
+
+    assert db.names() == sorted([ax, by, ay, st_ay])
+    checked = {call[1] for call in client.calls if call[0] == "exists"}
+    assert {"★ A | Y (Factory New)", ay, "★ A", "★ B"} <= checked
+    assert all(f"★ B | X ({wear})" in checked for wear in scraper.WEARS)
+    assert sum(1 for call in client.calls if call[0] == "page") == 3
+
+
+def test_variants_missing_from_their_group_page(db, run_scraper):
+    fn, mw = "★ A | Fade (Factory New)", "★ A | Fade (Minimal Wear)"
+    st_fn, st_mw, st_ft = (f"★ StatTrak™ A | Fade ({wear})" for wear in ("Factory New", "Minimal Wear", "Field-Tested"))
+    pages = {"G1": {fn: ("img-fn", HISTORY), mw: ("img-mw", HISTORY), st_fn: ("img-st-fn", HISTORY)}}
+    books = {fn: (1.0, 1.0), mw: (1.0, 1.0), st_fn: (1.0, 1.0), st_mw: (None, 2.0), st_ft: (3.0, 2.0)}
+    # StatTrak MW exists. StatTrak FT passes the existence check but Steam has no price history for it.
+    client = FakeClient({"G1": "★ A | Fade"}, pages, books, {st_mw: HISTORY[:1]}, exists={st_mw, st_ft})
+
+    assert run_scraper(client) == [st_ft]
+
+    assert db.names() == sorted([fn, mw, st_fn, st_mw])
+    knife = db.knife(st_mw)
+    assert knife["image"] == "img-mw" and float(knife["bid"]) == 2.0  # image of the same wear
+    checked = {call[1] for call in client.calls if call[0] == "exists"}
+    assert checked == (set(scraper.group_variants("★ A | Fade")) - {fn, mw, st_fn}) | {"★ A"}
+
+    # Next run: updated on its own, its group page isn't loaded a second time for it.
+    client = FakeClient({"G1": "★ A | Fade"}, pages, books, {st_mw: HISTORY[:1]}, exists={st_mw})
+    assert run_scraper(client) == []
+    assert client.calls.count(("page", "G1")) == 1 and ("hist", st_mw) in client.calls
 
 
 # --- The real client against a fake Steam ----------------------------------------------------

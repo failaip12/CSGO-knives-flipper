@@ -117,6 +117,19 @@ def test_unexpected_response(client, fake_steam, body):
         client().get_order_book("a")
 
 
+def test_item_exists_only_on_explicit_success(client, fake_steam):
+    fake_steam.reply_json(
+        {"data": {"success": True, "data": {"eCurrency": 3}}},
+        {"data": {"success": False}},
+        {"data": None},
+        {"data": {"success": 1}},
+    )
+    market = client()
+
+    assert [market.item_exists(name) for name in "abcd"] == [True, False, False, False]
+    assert qp(fake_steam.calls[0][1]) == [730, "a"]
+
+
 # --- Group pages -----------------------------------------------------------------------------
 
 

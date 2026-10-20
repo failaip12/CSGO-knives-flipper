@@ -384,6 +384,11 @@ class SteamMarketClient:
             item.history = histories.get(item_name)
         return group
 
+    def item_exists(self, name: str) -> bool:
+        """Whether Steam has a market item with exactly this name."""
+        data = self._action("orderbook", "Load", APPID, name, limit="orderbook")
+        return isinstance(data, dict) and data.get("success") is True
+
     def get_order_book(self, name: str) -> OrderBook:
         data = self._action("orderbook", "Load", APPID, name, limit="orderbook")
         if not isinstance(data, dict) or not data.get("success"):

@@ -66,6 +66,38 @@ def knife_group_name(name: str) -> str:
     return WEAR_RE.sub("", name.replace("StatTrak™ ", ""))
 
 
+def unlisted_group_candidates(known_groups: Set[str]) -> List[str]:
+    """
+    Knife skins that may exist but weren't found: every knife type combined with every
+    finish seen on any knife type, plus every vanilla knife.
+    These are only guesses, they're checked with Steam before anything is loaded.
+    """
+    knife_types, finishes = set(), set()
+    for group in known_groups:
+        knife_type, _, finish = group.partition(" | ")
+        knife_types.add(knife_type)
+        if finish:
+            finishes.add(finish)
+    candidates = {f"{t} | {f}" for t in knife_types for f in finishes} | knife_types
+    return sorted(candidates - known_groups)
+
+
+def group_variants(group: str) -> List[str]:
+    """Every name a knife of this skin can have: each wear with and without StatTrak."""
+    names = [f"{group} ({wear})" for wear in WEARS] if " | " in group else [group]
+    return names + [name.replace("★ ", "★ StatTrak™ ", 1) for name in names]
+
+
+def find_existing_variant(client: SteamMarketClient, group: str) -> Optional[str]:
+    """Returns the name of a variant of the group that exists on the market, if any."""
+    # Every skin exists without StatTrak, so the StatTrak names don't need checking.
+    names = [f"{group} ({wear})" for wear in WEARS] if " | " in group else [group]
+    for name in names:
+        if client.item_exists(name):
+            return name
+    return None
+
+
 def complete_knife(client: SteamMarketClient, result: KnifeResult) -> KnifeResult:
     """Fetches whatever is still missing for a knife."""
     try:
@@ -125,6 +157,11 @@ class KnifeUpdater:
         self.updated = 0
         self.added = 0
         self.pages_unavailable = False
+        # Group pages loaded this run, a knife missing from its page isn't on it at all.
+        self.loaded_groups: Set[str] = set()
+        self.images: Dict[str, str] = {
+            name: knife.knife_image for name, knife in self.knives.items() if knife.knife_image
+        }
 
     def _connect(self) -> None:
         self.connection, self.cursor = connect_to_db(
@@ -204,6 +241,7 @@ class KnifeUpdater:
         else:
             last_sold, last_price = knife.last_sold, knife.last_min_price_with_fee
         min_sell = result.order_book.min_sell_price
+        image = result.image or knife.knife_image or self.sibling_image(result.name)
         self.pending.append(
             Knife(
                 result.name,
@@ -213,12 +251,14 @@ class KnifeUpdater:
                 last_price,
                 float(last_price) / STEAM_FEE if last_price else None,
                 result.order_book.max_buy_price,
-                result.image or knife.knife_image,
+                image,
                 last_sold,
                 last_updated=datetime.now(),
             )
         )
         knife.last_sold = last_sold
+        if image:
+            self.images[result.name] = image
         if len(self.pending) >= BATCH_SIZE:
             self.flush()
         return True
@@ -255,6 +295,7 @@ class KnifeUpdater:
                     failed_groups[key] = groups[key]
                     continue
                 for result in results:
+                    self.loaded_groups.add(knife_group_name(result.name))
                     seen.add(result.name)
                     if not result.complete or not self.save(result):
                         incomplete[result.name] = result
@@ -304,6 +345,75 @@ class KnifeUpdater:
             )
         self.flush()
 
+    def sibling_image(self, name: str) -> Optional[str]:
+        """Image of another variant of the same skin, the same wear if possible."""
+        group = knife_group_name(name)
+        wear = WEAR_RE.search(name)
+        siblings = [n for n in self.images if knife_group_name(n) == group]
+        siblings.sort(key=lambda n: not (wear and n.endswith(wear.group(0))))
+        return self.images[siblings[0]] if siblings else None
+
+    def find_missing_variants(self, client: SteamMarketClient) -> List[str]:
+        """
+        Group pages leave out some variants (e.g. a StatTrak wear that hasn't sold in years).
+        Returns the names of such variants that Steam confirms exist.
+        """
+        groups = {knife_group_name(name) for name in self.knives}
+        candidates = sorted(
+            {name for group in groups for name in group_variants(group)} - self.knives.keys()
+        )
+        found = []
+        jobs = {
+            name: (lambda name=name: client.item_exists(name)) for name in candidates
+        }
+        with run_parallel(jobs, "Looking for missing knife variants") as finished:
+            for name, future in finished:
+                try:
+                    exists = future.result()
+                except FATAL_ERRORS:
+                    raise
+                except Exception as e:
+                    self.logger.warning(f"Could not check whether {name} exists: {e!r}")
+                    continue
+                if exists:
+                    found.append(name)
+        self.logger.info(
+            f"Found {len(found)} knife variants missing from their group pages (checked {len(candidates)})."
+        )
+        return found
+
+    def find_unlisted_groups(
+        self, client: SteamMarketClient, known_groups: Set[str]
+    ) -> Dict[str, str]:
+        """
+        Steam's search leaves out skins that have no listings at all right now. Returns
+        {name of an existing variant: group name} for such skins. Loading the group page
+        by that name only ever adds knives Steam itself describes, never guessed names.
+        """
+        candidates = unlisted_group_candidates(known_groups)
+        if not candidates:
+            return {}
+        found: Dict[str, str] = {}
+        jobs = {
+            group: (lambda group=group: find_existing_variant(client, group))
+            for group in candidates
+        }
+        with run_parallel(jobs, "Looking for unlisted knives") as finished:
+            for group, future in finished:
+                try:
+                    name = future.result()
+                except FATAL_ERRORS:
+                    raise
+                except Exception as e:
+                    self.logger.warning(f"Could not check whether {group} exists: {e!r}")
+                    continue
+                if name:
+                    found[name] = group
+        self.logger.info(
+            f"Found {len(found)} knife groups that aren't listed in the search (checked {len(candidates)})."
+        )
+        return found
+
     def run(self, client: SteamMarketClient) -> Dict[str, KnifeResult]:
         try:
             groups = client.search_knife_groups()
@@ -322,17 +432,27 @@ class KnifeUpdater:
         incomplete: Dict[str, KnifeResult] = {}
         self.update_groups(client, groups, seen, incomplete, "Knife groups")
 
+        if self.discover:
+            known = set(groups.values()) | {knife_group_name(n) for n in self.knives}
+            unlisted = self.find_unlisted_groups(client, known)
+            self.update_groups(client, unlisted, seen, incomplete, "Unlisted knife groups")
+
         # Knives that weren't on the loaded group pages, because the search failed, their
         # group failed to load or they're not listed in the search anymore. A knife's own
         # page redirects to its group page, so one page per group is still enough.
         known_groups: Dict[str, str] = {}
         for name in sorted(self.knives.keys() - seen):
-            known_groups.setdefault(knife_group_name(name), name)
+            if knife_group_name(name) not in self.loaded_groups:
+                known_groups.setdefault(knife_group_name(name), name)
         groups = {name: group for group, name in known_groups.items()}
         self.update_groups(client, groups, seen, incomplete, "Known knife groups")
 
         for name in self.knives.keys() - seen:
             incomplete[name] = KnifeResult(name)
+        # Added only if Steam returns both an order book and a price history for them.
+        if self.discover and not self.pages_unavailable:
+            for name in self.find_missing_variants(client):
+                incomplete.setdefault(name, KnifeResult(name))
 
         for attempt in range(MAX_RETRY_COUNT + 1):
             if not incomplete:
