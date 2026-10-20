@@ -4,9 +4,9 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from conftest import GROUP_PAGE_KEY
 
 import steam_market as sm
-from conftest import GROUP_PAGE_KEY
 
 BAYONET = "★ Bayonet | Boreal Forest (Field-Tested)"
 

@@ -5,10 +5,10 @@ import urllib.parse
 from datetime import datetime
 
 import pytest
+from conftest import GROUP_PAGE_KEY, ORDER_BOOK
 
 import scraper
 import steam_market as sm
-from conftest import GROUP_PAGE_KEY, ORDER_BOOK
 
 
 def at(text: str) -> datetime:
