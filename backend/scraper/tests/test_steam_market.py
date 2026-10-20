@@ -85,8 +85,9 @@ def test_order_book_without_orders(client, fake_steam):
 def test_order_book_for_unknown_item(client, fake_steam):
     fake_steam.reply_json({"data": {"success": False}})
 
+    market = client()
     with pytest.raises(sm.SteamDataError):
-        client().get_order_book("nope")
+        market.get_order_book("nope")
 
 
 def test_order_book_in_other_currency(client, fake_steam):
@@ -99,15 +100,17 @@ def test_order_book_in_other_currency(client, fake_steam):
         }
     )
 
+    market = client()
     with pytest.raises(sm.SteamCurrencyError):
-        client().get_order_book("usd")
+        market.get_order_book("usd")
 
 
 def test_price_history_in_other_currency(client, fake_steam):
     fake_steam.reply_json({"data": {"ecurrency": 1, "prices": []}})
 
+    market = client()
     with pytest.raises(sm.SteamCurrencyError):
-        client().get_price_history("usd")
+        market.get_price_history("usd")
 
 
 def test_price_history_is_sorted_utc_and_rounded(client, fake_steam):
@@ -150,16 +153,18 @@ def test_price_history_is_sorted_utc_and_rounded(client, fake_steam):
 def test_unusable_price_history(client, fake_steam, body):
     fake_steam.reply((200, body))
 
+    market = client()
     with pytest.raises(sm.SteamDataError):
-        client().get_price_history("a")
+        market.get_price_history("a")
 
 
 @pytest.mark.parametrize("body", ["<html>nope", "[1,2]"])
 def test_unexpected_response(client, fake_steam, body):
     fake_steam.reply((200, body))
 
+    market = client()
     with pytest.raises(sm.SteamDataError):
-        client().get_order_book("a")
+        market.get_order_book("a")
 
 
 def test_item_exists_only_on_explicit_success(client, fake_steam):
@@ -207,8 +212,9 @@ def test_group_page(client, fake_steam, group_page):
 def test_unusable_group_page(client, fake_steam, body):
     fake_steam.reply((200, body))
 
+    market = client()
     with pytest.raises(sm.SteamDataError):
-        client().get_knife_group("G1", "x")
+        market.get_knife_group("G1", "x")
 
 
 # --- Search ----------------------------------------------------------------------------------
@@ -335,10 +341,11 @@ def test_403_is_a_block_and_success_resets_the_cooldowns(client, fake_steam):
 
 def test_endpoint_blocked_for_good(client, fake_steam):
     fake_steam.reply(*[(429, "")] * 100)
+    market = client()
     start = time.monotonic()
 
     with pytest.raises(sm.SteamUnavailableError) as error:
-        client().get_order_book("a")
+        market.get_order_book("a")
 
     assert error.value.endpoint == "orderbook"
     assert 4 <= time.monotonic() - start < 8
@@ -355,8 +362,9 @@ def test_server_errors_are_retried(client, fake_steam):
 def test_server_errors_give_up(client, fake_steam):
     fake_steam.reply(*[(500, "")] * 10)
 
+    market = client()
     with pytest.raises(sm.SteamDataError):
-        client().get_order_book("a")
+        market.get_order_book("a")
 
     assert len(fake_steam.calls) == sm.MAX_ATTEMPTS
 
@@ -364,8 +372,9 @@ def test_server_errors_give_up(client, fake_steam):
 def test_client_errors_are_not_retried(client, fake_steam):
     fake_steam.reply((404, ""))
 
+    market = client()
     with pytest.raises(sm.SteamDataError):
-        client().get_order_book("a")
+        market.get_order_book("a")
 
     assert len(fake_steam.calls) == 1
 
