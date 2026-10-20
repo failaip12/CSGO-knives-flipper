@@ -180,7 +180,8 @@ def test_first_run_discovers_and_saves_knives(db, run_scraper):
         122.21,
         120.0,
     )
-    assert knife["last_sold"] == at("2026-10-19 11") and knife["image"] == "imgA"
+    assert knife["last_sold"] == at("2026-10-19 11")
+    assert knife["image"] == "imgA"
     assert db.history(knife["knife_id"]) == HISTORY
     assert (knife["amount_sold"], knife["amount_sold_last_year"]) == (3, 4)
     stattrak = db.knife(ST_A)
@@ -191,9 +192,11 @@ def test_first_run_discovers_and_saves_knives(db, run_scraper):
         stattrak["last_sold"],
     ) == (None, None, None, None)
     # History missing from the group page comes from the standalone endpoint.
-    assert ("hist", B) in client.calls and float(db.knife(B)["last_price"]) == 120.0
+    assert ("hist", B) in client.calls
+    assert float(db.knife(B)["last_price"]) == 120.0
     # A failed group page is retried, a failed order book is retried on its own.
-    assert client.calls.count(("page", "G3")) == 2 and db.knife(C)["ask"] is not None
+    assert client.calls.count(("page", "G3")) == 2
+    assert db.knife(C)["ask"] is not None
     assert client.calls.count(("book", A)) == 2
 
 
@@ -210,7 +213,8 @@ def test_rerun_updates_the_last_hour_and_adds_new_sales(db, run_scraper):
 
     knife = db.knife(A)
     assert db.history(knife["knife_id"]) == newer
-    assert knife["image"] == "imgA2" and float(knife["last_price"]) == 125.0
+    assert knife["image"] == "imgA2"
+    assert float(knife["last_price"]) == 125.0
     assert db.query("SELECT count(*) FROM SellTimes")[0][0] == 4
 
 
@@ -272,7 +276,8 @@ def test_data_from_the_old_scraper(db, run_scraper):
     assert db.knife(B)["knife_id"] not in (1, 2)
     assert float(db.knife("★ Hidden | Knife (Field-Tested)")["ask"]) == 300.0
     gone = db.knife("★ Gone | Knife (Well-Worn)")
-    assert float(gone["last_price"]) == 77 and gone["last_sold"] == at("2025-01-01 00")
+    assert float(gone["last_price"]) == 77
+    assert gone["last_sold"] == at("2025-01-01 00")
     assert (
         client.calls.count(("book", "★ Gone | Knife (Well-Worn)"))
         == scraper.MAX_RETRY_COUNT + 1
@@ -285,7 +290,8 @@ def test_without_discovery_only_known_knives_are_updated(db, run_scraper):
 
     assert run_scraper(client, discover=False) == []
 
-    assert db.names() == [A] and db.knife(A)["ask"] is not None
+    assert db.names() == [A]
+    assert db.knife(A)["ask"] is not None
     assert not any(call[0] == "exists" for call in client.calls)
 
 
@@ -301,7 +307,8 @@ def test_search_failure_updates_known_knives(db, run_scraper):
 
     assert run_scraper(client) == []
 
-    assert db.knife(A)["ask"] is not None and db.knife(B)["ask"] is not None
+    assert db.knife(A)["ask"] is not None
+    assert db.knife(B)["ask"] is not None
 
 
 def many_knives(count):
@@ -330,7 +337,8 @@ def test_wrong_currency_stops_the_run_cleanly(db, run_scraper):
             "SELECT knife_name FROM knives WHERE last_updated IS NOT NULL"
         )
     }
-    assert updated and len(updated) < 40
+    assert updated
+    assert len(updated) < 40
     assert set(failed) == set(names) - updated
     assert db.query("SELECT count(*) FROM knives WHERE amount_sold > 0")[0][0] == len(
         updated
@@ -386,10 +394,12 @@ def test_unexpected_error_on_a_group_page(db, run_scraper, logger):
 
     assert run_scraper(client) == []
 
-    assert db.knife(names[3])["ask"] is not None and len(db.names()) == 20
+    assert db.knife(names[3])["ask"] is not None
+    assert len(db.names()) == 20
     log = Path(logger.log_file).read_text(encoding="utf-8")
     assert "Unexpected error while loading knife group G3." in log
-    assert "Traceback" in log and "KeyError: 'unexpected layout'" in log
+    assert "Traceback" in log
+    assert "KeyError: 'unexpected layout'" in log
 
 
 def test_dead_price_history_only_fails_knives_that_need_it(db, run_scraper):
@@ -462,7 +472,8 @@ def test_variants_missing_from_their_group_page(db, run_scraper):
     assert db.names() == sorted([fn, mw, st_fn, st_mw])
     knife = db.knife(st_mw)
     # Image of the same wear.
-    assert knife["image"] == "img-mw" and float(knife["bid"]) == 2.0
+    assert knife["image"] == "img-mw"
+    assert float(knife["bid"]) == 2.0
     checked = {call[1] for call in client.calls if call[0] == "exists"}
     assert checked == (set(scraper.group_variants("★ A | Fade")) - {fn, mw, st_fn}) | {
         "★ A"
@@ -473,7 +484,8 @@ def test_variants_missing_from_their_group_page(db, run_scraper):
         {"G1": "★ A | Fade"}, pages, books, {st_mw: HISTORY[:1]}, exists={st_mw}
     )
     assert run_scraper(client) == []
-    assert client.calls.count(("page", "G1")) == 1 and ("hist", st_mw) in client.calls
+    assert client.calls.count(("page", "G1")) == 1
+    assert ("hist", st_mw) in client.calls
 
 
 # --- The real client against a fake Steam ----------------------------------------------------

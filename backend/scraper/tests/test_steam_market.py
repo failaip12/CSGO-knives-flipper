@@ -79,7 +79,8 @@ def test_order_book_without_orders(client, fake_steam):
 
     book = client().get_order_book("x")
 
-    assert book.min_sell_price is None and book.max_buy_price is None
+    assert book.min_sell_price is None
+    assert book.max_buy_price is None
 
 
 def test_order_book_for_unknown_item(client, fake_steam):
@@ -190,10 +191,8 @@ def test_group_page(client, fake_steam, group_page):
 
     assert fake_steam.calls[0][1] == f"/market/listings/730/{GROUP_PAGE_KEY}"
     assert len(group.items) == 10
-    assert (
-        BAYONET in group.items
-        and "★ StatTrak™ Bayonet | Boreal Forest (Factory New)" in group.items
-    )
+    assert BAYONET in group.items
+    assert "★ StatTrak™ Bayonet | Boreal Forest (Factory New)" in group.items
     for item in group.items.values():
         assert item.history
         assert item.image.startswith(
@@ -233,7 +232,8 @@ def test_search_paging(client, fake_steam):
 
     groups, total = client()._search_all(sm.KNIFE_FILTERS)
 
-    assert groups == {"GA": "A", "GB": "B", "★ C": "★ C"} and total == 103
+    assert groups == {"GA": "A", "GB": "B", "★ C": "★ C"}
+    assert total == 103
     assert [qp(path)[0]["start"] for _, path, _ in fake_steam.calls] == [0, 100]
 
 
@@ -323,7 +323,8 @@ def test_rejected_requests_wait_and_retry(client, fake_steam):
     book = client().get_order_book("a")
 
     elapsed = time.monotonic() - start
-    assert book.max_buy_price == 122.21 and len(fake_steam.calls) == 3
+    assert book.max_buy_price == 122.21
+    assert len(fake_steam.calls) == 3
     assert 2.5 < elapsed < 5  # cooldowns of 1s then 2s
 
 
@@ -406,7 +407,8 @@ def test_simultaneous_rejections_start_one_cooldown(client, fake_steam):
     with ThreadPoolExecutor(4) as executor:
         list(executor.map(lambda i: market.get_order_book(str(i)), range(4)))
 
-    assert time.monotonic() - start < 2.5 and len(fake_steam.calls) == 8
+    assert time.monotonic() - start < 2.5
+    assert len(fake_steam.calls) == 8
 
 
 def test_blocked_order_books_dont_pause_group_pages(client, fake_steam, group_page):
@@ -422,7 +424,8 @@ def test_blocked_order_books_dont_pause_group_pages(client, fake_steam, group_pa
         book.result()
         book_time = time.monotonic() - start
 
-    assert page_time < 0.8 and book_time >= 1.0
+    assert page_time < 0.8
+    assert book_time >= 1.0
 
 
 def test_blocked_search_doesnt_pause_price_history(client, fake_steam):
