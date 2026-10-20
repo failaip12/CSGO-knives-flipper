@@ -6,7 +6,6 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 import psycopg2
 from tqdm import tqdm
@@ -52,10 +51,10 @@ FATAL_ERRORS = (SteamCurrencyError, SteamUnavailableError)
 @dataclass
 class KnifeResult:
     name: str
-    image: Optional[str] = None
-    history: Optional[PriceHistory] = None
-    order_book: Optional[OrderBook] = None
-    error: Optional[str] = None
+    image: str | None = None
+    history: PriceHistory | None = None
+    order_book: OrderBook | None = None
+    error: str | None = None
 
     @property
     def complete(self) -> bool:
@@ -89,7 +88,7 @@ def group_variants(group: str) -> list[str]:
     return names + [name.replace("★ ", "★ StatTrak™ ", 1) for name in names]
 
 
-def find_existing_variant(client: SteamMarketClient, group: str) -> Optional[str]:
+def find_existing_variant(client: SteamMarketClient, group: str) -> str | None:
     """Returns the name of a variant of the group that exists on the market, if any."""
     # Every skin exists without StatTrak, so the StatTrak names don't need checking.
     names = [f"{group} ({wear})" for wear in WEARS] if " | " in group else [group]
@@ -361,7 +360,7 @@ class KnifeUpdater:
             )
         self.flush()
 
-    def sibling_image(self, name: str) -> Optional[str]:
+    def sibling_image(self, name: str) -> str | None:
         """Image of another variant of the same skin, the same wear if possible."""
         group = knife_group_name(name)
         wear = WEAR_RE.search(name)

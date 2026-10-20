@@ -5,7 +5,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -55,22 +55,22 @@ class SteamCurrencyError(Exception):
 class SteamUnavailableError(Exception):
     """Steam kept rejecting requests to an endpoint for longer than its max_blocked."""
 
-    def __init__(self, message: str, endpoint: Optional[str] = None):
+    def __init__(self, message: str, endpoint: str | None = None):
         super().__init__(message)
         self.endpoint = endpoint
 
 
 @dataclass
 class OrderBook:
-    min_sell_price: Optional[float]
-    max_buy_price: Optional[float]
+    min_sell_price: float | None
+    max_buy_price: float | None
 
 
 @dataclass
 class GroupItem:
     name: str
-    image: Optional[str] = None
-    history: Optional[PriceHistory] = None
+    image: str | None = None
+    history: PriceHistory | None = None
 
 
 @dataclass
@@ -119,7 +119,7 @@ class RateLimit:
     max_blocked: float = MAX_BLOCKED_SECONDS
     next_slot: float = 0.0
     blocked_until: float = 0.0
-    blocked_since: Optional[float] = None
+    blocked_since: float | None = None
     cooldown_step: int = 0
     successes: int = 0
 

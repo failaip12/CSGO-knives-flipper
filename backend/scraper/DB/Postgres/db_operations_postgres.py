@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 import psycopg2
 import psycopg2.errors
@@ -107,7 +106,7 @@ def save_knives_to_db(knives: list[Knife], cur: cursor, conn: connection) -> Non
 
 
 def get_knife_names_from_db(
-    cur: cursor, limit: Optional[int] = None, date: Optional[str] = None
+    cur: cursor, limit: int | None = None, date: str | None = None
 ) -> list[str]:
     if date is None:
         select_query = (
@@ -122,7 +121,7 @@ def get_knife_names_from_db(
     return knife_list
 
 
-def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> list[Knife]:
+def get_knife_list_from_db(cur: cursor, date: str | None = None) -> list[Knife]:
     if date is None:
         select_query = "SELECT * FROM knives ORDER BY last_updated ASC NULLS FIRST"
     else:
@@ -147,7 +146,7 @@ def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> list[Knif
     return knife_list
 
 
-def get_knife_from_db(cur: cursor, name: str) -> Optional[Knife]:
+def get_knife_from_db(cur: cursor, name: str) -> Knife | None:
     cur.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
     row = cur.fetchone()
     if row:

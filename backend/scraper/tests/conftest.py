@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 
@@ -160,7 +160,7 @@ class Database:
     def __init__(self, connection):
         self.connection = connection
 
-    def query(self, sql: str, *args: Any) -> Optional[list]:
+    def query(self, sql: str, *args: Any) -> list | None:
         with self.connection.cursor() as cur:
             cur.execute(sql, args)
             return cur.fetchall() if cur.description else None
@@ -170,7 +170,7 @@ class Database:
         with self.connection.cursor() as cur:
             cur.execute(SCHEMA)
 
-    def knife(self, name: str) -> Optional[dict]:
+    def knife(self, name: str) -> dict | None:
         rows = self.query(
             """SELECT knife_id, current_min_price_with_fee, buy_order_price, last_min_price_with_fee,
                       last_sold, knife_image, last_updated, amount_sold, amount_sold_last_year
