@@ -1,0 +1,23 @@
+# Postgres for the scraper and the API: docker compose up -d
+# The schema is created from baza_postgres.sql the first time the volume is empty.
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scraper
+      POSTGRES_PASSWORD: scraper
+      POSTGRES_DB: knives
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - knives-db:/var/lib/postgresql
+      - ./scraper/DB/Postgres/baza_postgres.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scraper -d knives"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  knives-db:
