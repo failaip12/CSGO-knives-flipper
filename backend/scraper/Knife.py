@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 
 class Knife:
@@ -7,14 +6,14 @@ class Knife:
         self,
         knife_name: str,
         knife_id: int,
-        current_min_price_with_fee: Optional[float],
-        current_min_price_without_fee: Optional[float],
-        last_min_price_with_fee: Optional[float],
-        last_min_price_without_fee: Optional[float],
-        buy_order_price: Optional[float],
-        knife_image: Optional[str] = None,
-        last_sold: Optional[datetime] = None,
-        last_updated: Optional[datetime] = None,
+        current_min_price_with_fee: float | None,
+        current_min_price_without_fee: float | None,
+        last_min_price_with_fee: float | None,
+        last_min_price_without_fee: float | None,
+        buy_order_price: float | None,
+        knife_image: str | None = None,
+        last_sold: datetime | None = None,
+        last_updated: datetime | None = None,
     ):
         self.knife_name = knife_name
         self.knife_id = knife_id

@@ -1,70 +1,76 @@
+import sys
 from datetime import datetime
-from typing import List, Optional, Set, Tuple
 
 import psycopg2
+import psycopg2.errors
 from psycopg2.extensions import connection, cursor
-from tqdm import tqdm
+from psycopg2.extras import execute_values
 
 from CustomLogger import CustomLogger
 from Knife import Knife
 
 
-def add_new_knives_to_db(
-    names: Set[str], cur: cursor, conn: connection, logger: CustomLogger
-) -> None:
-    count = 0
-    for name in tqdm(names):
-        cur.execute("SELECT knife_name FROM knives WHERE knife_name = (%s)", (name,))
-        if cur.fetchone() is None:
+def add_knife_to_db(name: str, cur: cursor, conn: connection) -> int:
+    """Inserts the knife if it's missing and returns its knife_id."""
+    # Existing knife_ids were overwritten with Steam ids in the past, so the serial
+    # sequence can hand out an id that is already taken. Retrying moves past it.
+    for _ in range(1000):
+        try:
             cur.execute(
-                "INSERT INTO knives (knife_name) VALUES (%s)",
+                "INSERT INTO knives (knife_name) VALUES (%s) ON CONFLICT (knife_name) DO NOTHING RETURNING knife_id",
                 (name,),
             )
+            row = cur.fetchone()
             conn.commit()
-            count += 1
-    logger.info(f"Added {count} new knives to the database.")
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()
+            continue
+        if row:
+            return row[0]
+        cur.execute("SELECT knife_id FROM knives WHERE knife_name = %s", (name,))
+        existing = cur.fetchone()
+        if existing:
+            return existing[0]
+    raise RuntimeError(f"Could not find a free knife_id for {name}")
 
 
-def get_and_save_historical_pricing_helper(
-    data: List[List],
-    date_format: str,
+def save_price_history(
+    history: list[tuple[datetime, float, int]],
     cur: cursor,
     conn: connection,
     knife_id: int,
-) -> Tuple[Optional[float], Optional[datetime]]:
-    price = None
-    parsed_date = None
-    for result in data:
-        date_string = result[0][:-4]
-        parsed_date = datetime.strptime(date_string, date_format)
-        price = result[1]
-        sold_count = result[2]
-        cur.execute(
-            "INSERT INTO SellTimes (sell_time) VALUES (%s) ON CONFLICT (sell_time) DO NOTHING RETURNING sell_time_id",
-            (parsed_date,),
-        )
-
-        existing_date = cur.fetchone()
-        if existing_date:
-            date_id = existing_date[0]
-        else:
-            cur.execute(
-                "SELECT sell_time_id FROM SellTimes WHERE sell_time = (%s)",
-                (parsed_date,),
-            )
-            fetched_row = cur.fetchone()
-            date_id = fetched_row[0] if fetched_row is not None else None
-
-        if date_id is not None:
-            cur.execute(
-                "INSERT INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES (%s, %s, %s, %s) ON CONFLICT (knife_id, sell_time_id) DO NOTHING",
-                (knife_id, date_id, price, sold_count),
-            )
-            conn.commit()
-    return price, parsed_date
+) -> None:
+    """Upserts (sell time, price, amount sold) entries into SellHistory."""
+    rows_by_time = {sold_at: (price, amount) for sold_at, price, amount in history}
+    if not rows_by_time:
+        return
+    times = list(rows_by_time)
+    execute_values(
+        cur,
+        "INSERT INTO SellTimes (sell_time) VALUES %s ON CONFLICT (sell_time) DO NOTHING",
+        [(sold_at,) for sold_at in times],
+        page_size=1000,
+    )
+    cur.execute(
+        "SELECT sell_time, sell_time_id FROM SellTimes WHERE sell_time = ANY(%s)",
+        (times,),
+    )
+    time_ids = dict(cur.fetchall())
+    execute_values(
+        cur,
+        """INSERT INTO SellHistory (knife_id, sell_time_id, price, quantity) VALUES %s
+        ON CONFLICT (knife_id, sell_time_id) DO UPDATE
+        SET price = EXCLUDED.price, quantity = EXCLUDED.quantity""",
+        [
+            (knife_id, time_ids[sold_at], price, amount)
+            for sold_at, (price, amount) in rows_by_time.items()
+        ],
+        page_size=1000,
+    )
+    conn.commit()
 
 
-def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> None:
+def save_knives_to_db(knives: list[Knife], cur: cursor, conn: connection) -> None:
     if not knives:
         return
 
@@ -101,8 +107,8 @@ def save_knives_to_db(knives: List[Knife], cur: cursor, conn: connection) -> Non
 
 
 def get_knife_names_from_db(
-    cur: cursor, limit: Optional[int] = None, date: Optional[str] = None
-) -> List[str]:
+    cur: cursor, limit: int | None = None, date: str | None = None
+) -> list[str]:
     if date is None:
         select_query = (
             "SELECT knife_name FROM knives ORDER BY last_updated ASC NULLS FIRST"
@@ -116,7 +122,7 @@ def get_knife_names_from_db(
     return knife_list
 
 
-def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> List[Knife]:
+def get_knife_list_from_db(cur: cursor, date: str | None = None) -> list[Knife]:
     if date is None:
         select_query = "SELECT * FROM knives ORDER BY last_updated ASC NULLS FIRST"
     else:
@@ -141,7 +147,7 @@ def get_knife_list_from_db(cur: cursor, date: Optional[str] = None) -> List[Knif
     return knife_list
 
 
-def get_knife_from_db(cur: cursor, name: str) -> Optional[Knife]:
+def get_knife_from_db(cur: cursor, name: str) -> Knife | None:
     cur.execute("SELECT * FROM knives WHERE knife_name = %s", (name,))
     row = cur.fetchone()
     if row:
@@ -164,7 +170,7 @@ def get_knife_from_db(cur: cursor, name: str) -> Optional[Knife]:
 
 def connect_to_db(
     host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
-) -> Tuple[connection, cursor]:
+) -> tuple[connection, cursor]:
     try:
         conn = psycopg2.connect(
             host=host, dbname=database, port=port, user=user, password=password
@@ -172,13 +178,13 @@ def connect_to_db(
         cur = conn.cursor()
     except psycopg2.Error as e:
         logger.fatal("SQL connection error " + str(e))
-        exit(1)
+        sys.exit(1)
     return conn, cur
 
 
 def connect_to_db_threaded(
     host: str, database: str, port: int, user: str, password: str, logger: CustomLogger
-) -> Tuple[connection, cursor]:
+) -> tuple[connection, cursor]:
     return connect_to_db(
         host=host,
         database=database,

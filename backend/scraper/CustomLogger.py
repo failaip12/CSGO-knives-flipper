@@ -1,5 +1,6 @@
 import inspect
 import os
+import traceback
 from datetime import datetime
 from enum import Enum, auto
 
@@ -37,7 +38,7 @@ class CustomLogger:
     ) -> None:
         # Check if log_level is a valid LogLevel enum member
         if not isinstance(log_level, LogLevel):
-            raise ValueError(
+            raise TypeError(
                 f"Invalid log level: {log_level}. Must be one of {', '.join([level.name for level in LogLevel])}."
             )
 
@@ -106,6 +107,10 @@ class CustomLogger:
     def error(self, message: str) -> None:
         """Log an error message."""
         self._log(LogLevel.ERROR, message)
+
+    def exception(self, message: str) -> None:
+        """Log an error message with the traceback of the exception being handled."""
+        self._log(LogLevel.ERROR, f"{message}\n{traceback.format_exc().rstrip()}")
 
     def fatal(self, message: str) -> None:
         """Log a fatal message."""
