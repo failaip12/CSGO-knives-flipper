@@ -1,21 +1,20 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import DECIMAL, Column
 from sqlmodel import Field, SQLModel
 
 
 class Knives(SQLModel, table=True):
-    knife_id: Optional[int] = Field(default=None, primary_key=True)
+    knife_id: int | None = Field(default=None, primary_key=True)
     knife_name: str = Field(index=True, unique=True, max_length=150)
-    current_min_price_with_fee: Optional[Decimal] = Field(default=None)
-    current_min_price_without_fee: Optional[Decimal] = Field(default=None)
-    last_min_price_with_fee: Optional[Decimal] = Field(default=None)
-    last_min_price_without_fee: Optional[Decimal] = Field(default=None)
-    buy_order_price: Optional[Decimal] = Field(default=None)
-    last_updated: Optional[datetime] = Field(default=None)
-    last_sold: Optional[datetime] = Field(default=None)
+    current_min_price_with_fee: Decimal | None = Field(default=None)
+    current_min_price_without_fee: Decimal | None = Field(default=None)
+    last_min_price_with_fee: Decimal | None = Field(default=None)
+    last_min_price_without_fee: Decimal | None = Field(default=None)
+    buy_order_price: Decimal | None = Field(default=None)
+    last_updated: datetime | None = Field(default=None)
+    last_sold: datetime | None = Field(default=None)
     amount_sold: int = Field(default=0)
     amount_sold_last_year: int = Field(default=0)
     selling_frequency: Decimal = Field(

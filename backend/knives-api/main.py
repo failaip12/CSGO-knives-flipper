@@ -1,7 +1,6 @@
 # py -m fastapi run .\main.py
 import os
 import sys
-from typing import Dict, List, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +16,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from scraper.DB.Postgres.config_postgres import DATABASE_URL  # noqa: E402
+from scraper.DB.Postgres.config_postgres import DATABASE_URL
 
 # from scraper.DB.MySQL.config_mysql import DATABASE_URL
 
@@ -35,7 +34,11 @@ STEAM_API_KEY = os.environ.get("STEAM_API_KEY")
 if not STEAM_API_KEY:
     raise ValueError("STEAM_API_KEY environment variable is not set.")
 STEAM_USERNAME = os.environ.get("STEAM_USERNAME")
+if not STEAM_USERNAME:
+    raise ValueError("STEAM_USERNAME environment variable is not set.")
 login_cookies = {"steamLoginSecure": os.environ.get("STEAM_COOKIE_STEAM_LOGIN_SECURE")}
+if not login_cookies.get("steamLoginSecure"):
+    raise ValueError("STEAM_COOKIE_STEAM_LOGIN_SECURE environment variable is not set.")
 
 steam_client = SteamClient(
     STEAM_API_KEY,
@@ -44,7 +47,7 @@ steam_client = SteamClient(
 )
 
 
-def filter_listings_to_knives(listings: Dict) -> Optional[List[str]]:
+def filter_listings_to_knives(listings: dict) -> list[str] | None:
     knife_names = []
     orders = listings.get("buy_orders")
     if orders is None:
@@ -63,19 +66,11 @@ def filter_listings_to_knives(listings: Dict) -> Optional[List[str]]:
     return knife_names
 
 
-@app.get("/")
-def read_root():
-    return {"Message": "HELLO"}
-
-
 @app.get("/knives")
-def read_knives() -> List[Knives]:
+def read_knives() -> list[Knives]:
     session = Session(engine)
     stmt = select(Knives)
-    resp: List[Knives] = []
-    for knife in session.scalars(stmt):
-        resp.append(knife)
-    return resp
+    return list(session.scalars(stmt))
 
 
 @app.get("/buy_orders")
