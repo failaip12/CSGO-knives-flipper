@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import requests
+from tqdm import tqdm
 
 from CustomLogger import CustomLogger
 
@@ -358,6 +359,7 @@ class SteamMarketClient:
         """
         # The order of search results changes between requests, so paging through all
         # knives skips some. Searching per knife type keeps every result on one page.
+        self.logger.info("Searching the market for knives.")
         _, total = self._search(KNIFE_FILTERS, 0, 1)
         groups: dict[str, str] = {}
         try:
@@ -367,7 +369,7 @@ class SteamMarketClient:
                 raise
             self.logger.warning(f"Could not load the knife types: {e}")
             weapon_tags = []
-        for tag in weapon_tags:
+        for tag in tqdm(weapon_tags, desc="Searching knife types"):
             try:
                 groups.update(self._search_all({**KNIFE_FILTERS, "Weapon": [tag]})[0])
             except SteamDataError as e:

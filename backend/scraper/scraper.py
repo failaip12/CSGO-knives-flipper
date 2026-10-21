@@ -151,10 +151,12 @@ class KnifeUpdater:
     def __init__(self, logger: CustomLogger, discover: bool):
         self.logger = logger
         self.discover = discover
+        self.logger.info("Loading the knives from the database.")
         self._connect()
         self.knives: dict[str, Knife] = {
             knife.knife_name: knife for knife in get_knife_list_from_db(self.cursor)
         }
+        self.logger.info(f"Loaded {len(self.knives)} knives from the database.")
         self.pending: list[Knife] = []
         self.unsaved: dict[str, KnifeResult] = {}
         self.updated_names: set[str] = set()
